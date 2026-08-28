@@ -85,24 +85,53 @@ def extract_account(description: str) -> str:
     return m.group(1) if m else ""
 
 
-def extract_post(page, url: str, cutoff: datetime) -> dict | None:
+def parse_iso_datetime(raw: str | None) -> datetime | None:
+    if not raw:
+        return None
+    try:
+        dt = datetime.fromisoformat(raw.strip().replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
+def extract_post_datetime(page) -> datetime | None:
+    candidates: list[datetime] = []
+
+    # Current Instagram pages may expose publication time through metadata.
+    for selector, attribute in [
+        ('meta[property="article:published_time"]', "content"),
+        ('meta[name="article:published_time"]', "content"),
+        ('time[datetime]', "datetime"),
+    ]:
+        try:
+            locator = page.locator(selector)
+            count = min(locator.count(), 10)
+            for i in range(count):
+                dt = parse_iso_datetime(locator.nth(i).get_attribute(attribute))
+                if dt:
+                    candidates.append(dt)
+        except Exception:
+            pass
+
+    # Prefer the newest valid timestamp on the post page. This avoids unrelated
+    # older timestamps that can appear in surrounding Instagram UI.
+    return max(candidates) if candidates else None
+
+
+def extract_post(page, url: str, cutoff: datetime) -> tuple[dict | None, str | None]:
     page.goto(url, wait_until="domcontentloaded", timeout=90000)
     page.wait_for_timeout(3500)
     if not session_valid(page):
         raise SessionInvalid("Instagram session invalid or challenged")
 
-    dt = None
-    try:
-        time_el = page.locator("time").first
-        if time_el.count():
-            raw = time_el.get_attribute("datetime")
-            if raw:
-                dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
-    except Exception:
-        pass
-
-    if dt is None or dt < cutoff:
-        return None
+    dt = extract_post_datetime(page)
+    if dt is None:
+        return None, "date_missing"
+    if dt < cutoff:
+        return None, "outside_window"
 
     description = ""
     try:
@@ -118,12 +147,12 @@ def extract_post(page, url: str, cutoff: datetime) -> dict | None:
     return {
         "url": url,
         "type": kind,
-        "posted_at": dt.astimezone(timezone.utc).isoformat(),
+        "posted_at": dt.isoformat(),
         "account": account,
         "likes": likes,
         "comments": comments,
         "description": description[:1500],
-    }
+    }, None
 
 
 def main() -> None:
@@ -153,6 +182,7 @@ def main() -> None:
 
     results = []
     errors = []
+    skip_reasons = {"date_missing": 0, "outside_window": 0}
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -194,18 +224,18 @@ def main() -> None:
                     context.close()
             return None
 
-        def post_with_active_session(url: str) -> tuple[bool, dict | None]:
+        def post_with_active_session(url: str) -> tuple[bool, dict | None, str | None]:
             nonlocal active_idx
             idx = active_idx
             while idx < len(states):
                 context = make_context(idx)
                 page = context.new_page()
                 try:
-                    item = extract_post(page, url, cutoff)
+                    item, skip_reason = extract_post(page, url, cutoff)
                     if idx != active_idx:
                         active_idx = idx
                         print(f"Instagram fallback activated: session {active_idx + 1}")
-                    return True, item
+                    return True, item, skip_reason
                 except SessionInvalid as exc:
                     errors.append({"stage": "post", "url": url, "session": idx + 1, "error": str(exc)})
                     print(f"Instagram session {idx + 1} invalid; trying next configured session")
@@ -213,10 +243,10 @@ def main() -> None:
                 except Exception as exc:
                     errors.append({"stage": "post", "url": url, "session": idx + 1, "error": str(exc)})
                     print(f"Post error on session {idx + 1}: {url}: {exc}")
-                    return False, None
+                    return False, None, None
                 finally:
                     context.close()
-            return False, None
+            return False, None, None
 
         for keyword, search_url in search_sources:
             links = search_with_active_session(keyword, search_url)
@@ -229,8 +259,11 @@ def main() -> None:
             if len(results) >= args.max_posts:
                 break
             print(f"Candidate {candidate_index}/{len(candidate_urls)}: {url}")
-            worked, item = post_with_active_session(url)
+            worked, item, skip_reason = post_with_active_session(url)
             if not worked:
+                continue
+            if skip_reason:
+                skip_reasons[skip_reason] = skip_reasons.get(skip_reason, 0) + 1
                 continue
             if item:
                 haystack = (item.get("description") or "").lower()
@@ -246,12 +279,14 @@ def main() -> None:
         "keywords": keywords,
         "candidate_count": len(candidate_urls),
         "recent_post_count": len(results),
+        "skip_reasons": skip_reasons,
         "posts": sorted(results, key=lambda x: x["posted_at"], reverse=True),
         "errors": errors,
     }
     Path(args.output).write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"Candidate URLs: {len(candidate_urls)}")
     print(f"Recent posts within {args.days} days: {len(results)}")
+    print(f"Skip reasons: {skip_reasons}")
     print(f"Saved: {args.output}")
 
 
