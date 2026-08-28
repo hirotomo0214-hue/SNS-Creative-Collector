@@ -18,9 +18,12 @@ on:
         required: true
         default: '30'
         type: string
+  issues:
+    types: [opened]
 
 jobs:
   research:
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.issue.title, '[ig-research]')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -28,6 +31,32 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+
+      - name: Resolve research inputs
+        id: inputs
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          INPUT_KEYWORDS: ${{ inputs.keywords }}
+          INPUT_DAYS: ${{ inputs.days }}
+          INPUT_MAX_POSTS: ${{ inputs.max_posts }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            KEYWORDS="$INPUT_KEYWORDS"
+            DAYS="$INPUT_DAYS"
+            MAX_POSTS="$INPUT_MAX_POSTS"
+          else
+            KEYWORDS=$(printf '%s\n' "$ISSUE_BODY" | sed -n 's/^keywords:[[:space:]]*//p' | head -n1)
+            DAYS=$(printf '%s\n' "$ISSUE_BODY" | sed -n 's/^days:[[:space:]]*//p' | head -n1)
+            MAX_POSTS=$(printf '%s\n' "$ISSUE_BODY" | sed -n 's/^max_posts:[[:space:]]*//p' | head -n1)
+          fi
+          [ -n "$KEYWORDS" ] || KEYWORDS='ティーフレックス,Teaflex,グリーンティー'
+          [ -n "$DAYS" ] || DAYS='7'
+          [ -n "$MAX_POSTS" ] || MAX_POSTS='30'
+          echo "keywords=$KEYWORDS" >> "$GITHUB_OUTPUT"
+          echo "days=$DAYS" >> "$GITHUB_OUTPUT"
+          echo "max_posts=$MAX_POSTS" >> "$GITHUB_OUTPUT"
 
       - name: Install dependencies
         run: |
@@ -67,9 +96,9 @@ jobs:
       - name: Research Instagram
         run: |
           python instagram_research.py \
-            --keywords "${{ inputs.keywords }}" \
-            --days "${{ inputs.days }}" \
-            --max-posts "${{ inputs.max_posts }}" \
+            --keywords "${{ steps.inputs.outputs.keywords }}" \
+            --days "${{ steps.inputs.outputs.days }}" \
+            --max-posts "${{ steps.inputs.outputs.max_posts }}" \
             --output instagram_research.json
 
       - name: Upload research result
