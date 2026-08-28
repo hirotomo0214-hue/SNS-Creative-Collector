@@ -22,8 +22,6 @@ on:
           - video
   issues:
     types: [opened]
-  push:
-    branches: [main]
 
 jobs:
   collect:
@@ -65,9 +63,8 @@ jobs:
             FOLDER=$(printf '%s\n' "$ISSUE_BODY" | sed -n 's/^folder_name:[[:space:]]*//p' | head -n1)
             MODE=$(printf '%s\n' "$ISSUE_BODY" | sed -n 's/^mode:[[:space:]]*//p' | head -n1)
           else
-            URL='https://x.com/Show_SylveSTAR/status/1938194153466450214'
-            FOLDER='20260828_Teaflex_Show_SylveSTAR'
-            MODE='image'
+            echo "Unsupported event: $EVENT_NAME"
+            exit 1
           fi
 
           if [ -z "$URL" ] || [ -z "$FOLDER" ]; then
