@@ -87,6 +87,15 @@ jobs:
             --folder-name "${{ steps.inputs.outputs.folder }}" \
             --mode "${{ steps.inputs.outputs.mode }}"
 
+      - name: Upload to Google Drive
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          DRIVE_ROOT_FOLDER_ID: 10C5SsjQveUs4Vn_inj0RpkNs2VyYR30Z
+        run: |
+          python drive_upload.py \
+            "${{ steps.inputs.outputs.folder }}" \
+            "output/${{ steps.inputs.outputs.folder }}"
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
