@@ -1,4 +1,5 @@
 import argparse
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -27,12 +28,31 @@ def run_yt_dlp(url: str, out_dir: Path) -> bool:
     return len(media) > 0
 
 
+def x_embed_url(url: str) -> str:
+    m = re.search(r"/status/(\d+)", url)
+    if not m:
+        return url
+    return f"https://platform.twitter.com/embed/Tweet.html?id={m.group(1)}&theme=light"
+
+
 def screenshot(url: str, out_dir: Path) -> None:
     target = out_dir / "screenshot.png"
+    host = urlparse(url).netloc.lower()
+    capture_url = url
+    selectors = []
+
+    if "x.com" in host or "twitter.com" in host:
+        capture_url = x_embed_url(url)
+        selectors = ["article", ".twitter-tweet-rendered", "body"]
+    elif "instagram.com" in host:
+        selectors = ["article", "main"]
+    elif "tiktok.com" in host:
+        selectors = ["main"]
+
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         context = browser.new_context(
-            viewport={"width": 1440, "height": 1600},
+            viewport={"width": 1440, "height": 1800},
             user_agent=(
                 "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
                 "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
@@ -40,26 +60,19 @@ def screenshot(url: str, out_dir: Path) -> None:
             locale="ja-JP",
         )
         page = context.new_page()
-        page.goto(url, wait_until="domcontentloaded", timeout=90000)
-        page.wait_for_timeout(8000)
-
-        host = urlparse(url).netloc.lower()
-        selectors = []
-        if "x.com" in host or "twitter.com" in host:
-            selectors = ["article"]
-        elif "instagram.com" in host:
-            selectors = ["article", "main"]
-        elif "tiktok.com" in host:
-            selectors = ["main"]
+        page.goto(capture_url, wait_until="networkidle", timeout=90000)
+        page.wait_for_timeout(5000)
 
         captured = False
         for selector in selectors:
             locator = page.locator(selector).first
             try:
                 if locator.count() and locator.is_visible():
-                    locator.screenshot(path=str(target))
-                    captured = True
-                    break
+                    box = locator.bounding_box()
+                    if box and box["width"] > 100 and box["height"] > 100:
+                        locator.screenshot(path=str(target))
+                        captured = True
+                        break
             except Exception:
                 pass
 
@@ -67,6 +80,9 @@ def screenshot(url: str, out_dir: Path) -> None:
             page.screenshot(path=str(target), full_page=True)
 
         browser.close()
+
+    if not target.exists() or target.stat().st_size < 5000:
+        raise SystemExit("Screenshot output is too small or missing")
 
 
 def main() -> None:
