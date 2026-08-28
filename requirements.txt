@@ -1,4 +1,4 @@
 playwright==1.54.0
-yt-dlp==2025.8.22
+yt-dlp
 google-api-python-client==2.179.0
 google-auth==2.40.3
