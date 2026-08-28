@@ -1,6 +1,8 @@
 import argparse
+import hashlib
 import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -71,34 +73,112 @@ def instagram_login_looks_valid(page) -> bool:
     return True
 
 
+def capture_locator_or_page(page, selectors: list[str], target: Path) -> bool:
+    captured = False
+    for selector in selectors:
+        locator = page.locator(selector).first
+        try:
+            if locator.count() and locator.is_visible():
+                box = locator.bounding_box()
+                if box and box["width"] > 100 and box["height"] > 100:
+                    locator.screenshot(path=str(target))
+                    captured = True
+                    break
+        except Exception:
+            pass
+
+    if not captured:
+        page.screenshot(path=str(target), full_page=True)
+
+    return target.exists() and target.stat().st_size >= 5000
+
+
 def capture_page(context, capture_url: str, selectors: list[str], target: Path) -> bool:
     page = context.new_page()
     try:
         page.goto(capture_url, wait_until="domcontentloaded", timeout=90000)
         page.wait_for_timeout(5000)
-
-        captured = False
-        for selector in selectors:
-            locator = page.locator(selector).first
-            try:
-                if locator.count() and locator.is_visible():
-                    box = locator.bounding_box()
-                    if box and box["width"] > 100 and box["height"] > 100:
-                        locator.screenshot(path=str(target))
-                        captured = True
-                        break
-            except Exception:
-                pass
-
-        if not captured:
-            page.screenshot(path=str(target), full_page=True)
-
-        return target.exists() and target.stat().st_size >= 5000
+        return capture_locator_or_page(page, selectors, target)
     finally:
         page.close()
 
 
-def screenshot(url: str, out_dir: Path) -> None:
+def instagram_next_locator(page):
+    selectors = [
+        'button[aria-label="Next"]',
+        'button[aria-label="次へ"]',
+        '[role="button"]:has(svg[aria-label="Next"])',
+        '[role="button"]:has(svg[aria-label="次へ"])',
+    ]
+    for selector in selectors:
+        locator = page.locator(selector).last
+        try:
+            if locator.count() and locator.is_visible():
+                return locator
+        except Exception:
+            pass
+    return None
+
+
+def capture_instagram_with_context(context, capture_url: str, out_dir: Path, only_if_carousel: bool) -> tuple[bool, bool]:
+    page = context.new_page()
+    try:
+        page.goto(capture_url, wait_until="domcontentloaded", timeout=90000)
+        page.wait_for_timeout(5000)
+        if not instagram_login_looks_valid(page):
+            return False, False
+
+        article = page.locator("article").first
+        next_button = instagram_next_locator(page)
+        is_carousel = next_button is not None
+        if only_if_carousel and not is_carousel:
+            return True, False
+
+        if not is_carousel:
+            target = out_dir / "screenshot.png"
+            ok = capture_locator_or_page(page, ["article", "main"], target)
+            return ok, False
+
+        hashes = set()
+        slide_count = 0
+        for _ in range(20):
+            target = out_dir / f"slide_{slide_count + 1:02d}.png"
+            ok = capture_locator_or_page(page, ["article"], target)
+            if not ok:
+                if target.exists():
+                    target.unlink()
+                break
+
+            digest = hashlib.sha256(target.read_bytes()).hexdigest()
+            if digest in hashes:
+                target.unlink()
+                break
+            hashes.add(digest)
+            slide_count += 1
+
+            next_button = instagram_next_locator(page)
+            if next_button is None:
+                break
+            try:
+                next_button.click(timeout=10000)
+                page.wait_for_timeout(1200)
+            except Exception:
+                break
+
+        if slide_count > 0:
+            legacy = out_dir / "screenshot.png"
+            first_slide = out_dir / "slide_01.png"
+            if first_slide.exists():
+                shutil.copyfile(first_slide, legacy)
+            print(f"Instagram carousel captured: {slide_count} slides")
+            return True, True
+
+        return False, True
+    finally:
+        page.close()
+
+
+def screenshot(url: str, out_dir: Path, only_if_carousel: bool = False) -> None:
     target = out_dir / "screenshot.png"
     host = urlparse(url).netloc.lower()
     capture_url = url
@@ -123,52 +203,61 @@ def screenshot(url: str, out_dir: Path) -> None:
             "locale": "ja-JP",
         }
 
-        if "instagram.com" in host:
-            states = instagram_storage_states()
-            for index, state in enumerate(states, start=1):
-                context = browser.new_context(storage_state=str(state), **base_kwargs)
-                page = context.new_page()
-                try:
-                    page.goto(capture_url, wait_until="domcontentloaded", timeout=90000)
-                    page.wait_for_timeout(5000)
-                    if not instagram_login_looks_valid(page):
-                        print(f"Instagram session {index} unavailable; trying next session")
-                        continue
+        try:
+            if "instagram.com" in host:
+                states = instagram_storage_states()
+                for index, state in enumerate(states, start=1):
+                    context = browser.new_context(storage_state=str(state), **base_kwargs)
+                    try:
+                        ok, is_carousel = capture_instagram_with_context(
+                            context, capture_url, out_dir, only_if_carousel
+                        )
+                        if ok:
+                            if only_if_carousel and not is_carousel:
+                                print(f"Instagram session {index} valid; no carousel capture needed")
+                            else:
+                                print(f"Instagram session {index} succeeded")
+                            return
 
-                    captured = False
-                    for selector in selectors:
-                        locator = page.locator(selector).first
+                        # Only an explicit invalid/login state should advance to the next saved session.
+                        probe = context.new_page()
                         try:
-                            if locator.count() and locator.is_visible():
-                                box = locator.bounding_box()
-                                if box and box["width"] > 100 and box["height"] > 100:
-                                    locator.screenshot(path=str(target))
-                                    captured = True
-                                    break
-                        except Exception:
-                            pass
-                    if not captured:
-                        page.screenshot(path=str(target), full_page=True)
+                            probe.goto(capture_url, wait_until="domcontentloaded", timeout=90000)
+                            probe.wait_for_timeout(2000)
+                            if not instagram_login_looks_valid(probe):
+                                print(f"Instagram session {index} unavailable; trying next session")
+                                continue
+                        finally:
+                            probe.close()
+                        raise SystemExit("Instagram capture failed with a valid session")
+                    finally:
+                        context.close()
 
-                    if target.exists() and target.stat().st_size >= 5000:
-                        print(f"Instagram session {index} succeeded")
-                        browser.close()
+                print("No saved Instagram session succeeded; trying public access")
+                context = browser.new_context(**base_kwargs)
+                try:
+                    ok, is_carousel = capture_instagram_with_context(
+                        context, capture_url, out_dir, only_if_carousel
+                    )
+                    if ok:
                         return
+                    raise SystemExit("Instagram screenshot output is too small or missing")
                 finally:
-                    page.close()
                     context.close()
 
-            print("No saved Instagram session succeeded; trying public access")
+            if only_if_carousel:
+                return
 
-        context = browser.new_context(**base_kwargs)
-        try:
-            if not capture_page(context, capture_url, selectors, target):
-                raise SystemExit("Screenshot output is too small or missing")
+            context = browser.new_context(**base_kwargs)
+            try:
+                if not capture_page(context, capture_url, selectors, target):
+                    raise SystemExit("Screenshot output is too small or missing")
+            finally:
+                context.close()
         finally:
-            context.close()
             browser.close()
 
-    if not target.exists() or target.stat().st_size < 5000:
+    if not only_if_carousel and (not target.exists() or target.stat().st_size < 5000):
         raise SystemExit("Screenshot output is too small or missing")
 
 
@@ -188,13 +277,17 @@ def main() -> None:
         if args.mode == "video" and not got_video:
             raise SystemExit("Video download failed")
 
+    host = urlparse(args.url).netloc.lower()
     if args.mode == "image" or (args.mode == "auto" and not got_video):
         screenshot(args.url, out_dir)
+    elif args.mode == "auto" and got_video and "instagram.com" in host:
+        # A mixed Instagram carousel may contain a downloadable video plus static slides.
+        screenshot(args.url, out_dir, only_if_carousel=True)
 
     files = [p.name for p in out_dir.iterdir() if p.is_file()]
     if not files:
         raise SystemExit("No output file created")
-    print("Created:", ", ".join(files))
+    print("Created:", ", ".join(sorted(files)))
 
 
 if __name__ == "__main__":
