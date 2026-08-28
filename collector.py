@@ -45,32 +45,36 @@ def x_embed_url(url: str) -> str:
     return f"https://platform.twitter.com/embed/Tweet.html?id={m.group(1)}&theme=light"
 
 
-def screenshot(url: str, out_dir: Path) -> None:
-    target = out_dir / "screenshot.png"
-    host = urlparse(url).netloc.lower()
-    capture_url = url
-    selectors = []
+def instagram_storage_states() -> list[Path]:
+    raw = os.environ.get("IG_STORAGE_STATE_FILES", "")
+    states = []
+    for value in raw.split(":"):
+        value = value.strip()
+        if value:
+            path = Path(value)
+            if path.is_file():
+                states.append(path)
+    return states
 
-    if "x.com" in host or "twitter.com" in host:
-        capture_url = x_embed_url(url)
-        selectors = ["article", ".twitter-tweet-rendered", "body"]
-    elif "instagram.com" in host:
-        selectors = ["article", "main"]
-    elif "tiktok.com" in host:
-        selectors = ["main"]
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        context = browser.new_context(
-            viewport={"width": 1440, "height": 1800},
-            user_agent=(
-                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-            ),
-            locale="ja-JP",
-        )
-        page = context.new_page()
-        page.goto(capture_url, wait_until="networkidle", timeout=90000)
+def instagram_login_looks_valid(page) -> bool:
+    current = page.url.lower()
+    if "/accounts/login" in current or "/challenge/" in current:
+        return False
+
+    try:
+        if page.locator('input[name="username"]').count() > 0:
+            return False
+    except Exception:
+        pass
+
+    return True
+
+
+def capture_page(context, capture_url: str, selectors: list[str], target: Path) -> bool:
+    page = context.new_page()
+    try:
+        page.goto(capture_url, wait_until="domcontentloaded", timeout=90000)
         page.wait_for_timeout(5000)
 
         captured = False
@@ -89,7 +93,80 @@ def screenshot(url: str, out_dir: Path) -> None:
         if not captured:
             page.screenshot(path=str(target), full_page=True)
 
-        browser.close()
+        return target.exists() and target.stat().st_size >= 5000
+    finally:
+        page.close()
+
+
+def screenshot(url: str, out_dir: Path) -> None:
+    target = out_dir / "screenshot.png"
+    host = urlparse(url).netloc.lower()
+    capture_url = url
+    selectors = []
+
+    if "x.com" in host or "twitter.com" in host:
+        capture_url = x_embed_url(url)
+        selectors = ["article", ".twitter-tweet-rendered", "body"]
+    elif "instagram.com" in host:
+        selectors = ["article", "main"]
+    elif "tiktok.com" in host:
+        selectors = ["main"]
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        base_kwargs = {
+            "viewport": {"width": 1440, "height": 1800},
+            "user_agent": (
+                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+            ),
+            "locale": "ja-JP",
+        }
+
+        if "instagram.com" in host:
+            states = instagram_storage_states()
+            for index, state in enumerate(states, start=1):
+                context = browser.new_context(storage_state=str(state), **base_kwargs)
+                page = context.new_page()
+                try:
+                    page.goto(capture_url, wait_until="domcontentloaded", timeout=90000)
+                    page.wait_for_timeout(5000)
+                    if not instagram_login_looks_valid(page):
+                        print(f"Instagram session {index} unavailable; trying next session")
+                        continue
+
+                    captured = False
+                    for selector in selectors:
+                        locator = page.locator(selector).first
+                        try:
+                            if locator.count() and locator.is_visible():
+                                box = locator.bounding_box()
+                                if box and box["width"] > 100 and box["height"] > 100:
+                                    locator.screenshot(path=str(target))
+                                    captured = True
+                                    break
+                        except Exception:
+                            pass
+                    if not captured:
+                        page.screenshot(path=str(target), full_page=True)
+
+                    if target.exists() and target.stat().st_size >= 5000:
+                        print(f"Instagram session {index} succeeded")
+                        browser.close()
+                        return
+                finally:
+                    page.close()
+                    context.close()
+
+            print("No saved Instagram session succeeded; trying public access")
+
+        context = browser.new_context(**base_kwargs)
+        try:
+            if not capture_page(context, capture_url, selectors, target):
+                raise SystemExit("Screenshot output is too small or missing")
+        finally:
+            context.close()
+            browser.close()
 
     if not target.exists() or target.stat().st_size < 5000:
         raise SystemExit("Screenshot output is too small or missing")
