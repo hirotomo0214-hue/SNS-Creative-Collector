@@ -18,6 +18,10 @@ def run_yt_dlp(url: str, out_dir: Path) -> bool:
         "--no-playlist",
         "--merge-output-format",
         "mp4",
+        "--js-runtimes",
+        "node",
+        "--remote-components",
+        "ejs:github",
         "-o",
         template,
     ]
