@@ -19,7 +19,7 @@ on:
         default: '30'
         type: string
   issues:
-    types: [opened, reopened]
+    types: [opened, reopened, edited]
 
 jobs:
   research:
