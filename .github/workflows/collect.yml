@@ -21,10 +21,11 @@ on:
           - image
           - video
   issues:
-    types: [opened]
+    types: [opened, reopened]
 
 jobs:
   collect:
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.issue.title, '[collect]')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -44,7 +45,6 @@ jobs:
         shell: bash
         env:
           EVENT_NAME: ${{ github.event_name }}
-          ISSUE_TITLE: ${{ github.event.issue.title }}
           ISSUE_BODY: ${{ github.event.issue.body }}
           INPUT_URL: ${{ inputs.url }}
           INPUT_FOLDER: ${{ inputs.folder_name }}
@@ -54,17 +54,10 @@ jobs:
             URL="$INPUT_URL"
             FOLDER="$INPUT_FOLDER"
             MODE="$INPUT_MODE"
-          elif [ "$EVENT_NAME" = "issues" ]; then
-            if [[ "$ISSUE_TITLE" != \[collect\]* ]]; then
-              echo "Not a collector issue."
-              exit 0
-            fi
+          else
             URL=$(printf '%s\n' "$ISSUE_BODY" | sed -n 's/^url:[[:space:]]*//p' | head -n1)
             FOLDER=$(printf '%s\n' "$ISSUE_BODY" | sed -n 's/^folder_name:[[:space:]]*//p' | head -n1)
             MODE=$(printf '%s\n' "$ISSUE_BODY" | sed -n 's/^mode:[[:space:]]*//p' | head -n1)
-          else
-            echo "Unsupported event: $EVENT_NAME"
-            exit 1
           fi
 
           if [ -z "$URL" ] || [ -z "$FOLDER" ]; then
@@ -104,10 +97,10 @@ jobs:
           FILES=""
           for N in 01 02 03; do
             VAR="IG_STORAGE_STATE_${N}"
-            VALUE="${!VAR}"
+            VALUE="${!VAR:-}"
             if [ -n "$VALUE" ]; then
               FILE="$RUNNER_TEMP/ig_storage_state_${N}.json"
-              printf '%s' "$VALUE" > "$FILE"
+              printf '%s' "$VALUE" | base64 --decode > "$FILE"
               chmod 600 "$FILE"
               if [ -z "$FILES" ]; then
                 FILES="$FILE"
