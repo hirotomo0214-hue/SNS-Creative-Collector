@@ -1,15 +1,15 @@
-import json
 import mimetypes
 import os
 import sys
 from pathlib import Path
 
-from google.oauth2 import service_account
+from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
 SCOPES = ["https://www.googleapis.com/auth/drive"]
 FOLDER_MIME = "application/vnd.google-apps.folder"
+TOKEN_URI = "https://oauth2.googleapis.com/token"
 
 
 def escape_q(value: str) -> str:
@@ -17,11 +17,30 @@ def escape_q(value: str) -> str:
 
 
 def get_service():
-    raw = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "")
-    if not raw:
-        raise SystemExit("GOOGLE_SERVICE_ACCOUNT_JSON is missing")
-    info = json.loads(raw)
-    creds = service_account.Credentials.from_service_account_info(info, scopes=SCOPES)
+    client_id = os.environ.get("GOOGLE_CLIENT_ID", "")
+    client_secret = os.environ.get("GOOGLE_CLIENT_SECRET", "")
+    refresh_token = os.environ.get("GOOGLE_REFRESH_TOKEN", "")
+
+    missing = [
+        name
+        for name, value in (
+            ("GOOGLE_CLIENT_ID", client_id),
+            ("GOOGLE_CLIENT_SECRET", client_secret),
+            ("GOOGLE_REFRESH_TOKEN", refresh_token),
+        )
+        if not value
+    ]
+    if missing:
+        raise SystemExit(f"Missing OAuth secrets: {', '.join(missing)}")
+
+    creds = Credentials(
+        token=None,
+        refresh_token=refresh_token,
+        token_uri=TOKEN_URI,
+        client_id=client_id,
+        client_secret=client_secret,
+        scopes=SCOPES,
+    )
     return build("drive", "v3", credentials=creds, cache_discovery=False)
 
 
@@ -69,7 +88,11 @@ def find_file(service, parent_id: str, name: str):
 
 def upload_or_update(service, parent_id: str, path: Path):
     mime_type, _ = mimetypes.guess_type(path.name)
-    media = MediaFileUpload(str(path), mimetype=mime_type or "application/octet-stream", resumable=True)
+    media = MediaFileUpload(
+        str(path),
+        mimetype=mime_type or "application/octet-stream",
+        resumable=True,
+    )
     existing = find_file(service, parent_id, path.name)
     if existing:
         updated = service.files().update(
