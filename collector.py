@@ -1,4 +1,5 @@
 import argparse
+import os
 import re
 import subprocess
 import sys
@@ -19,8 +20,13 @@ def run_yt_dlp(url: str, out_dir: Path) -> bool:
         "mp4",
         "-o",
         template,
-        url,
     ]
+
+    cookies_file = os.environ.get("YT_COOKIES_FILE", "")
+    if cookies_file and Path(cookies_file).is_file():
+        cmd.extend(["--cookies", cookies_file])
+
+    cmd.append(url)
     result = subprocess.run(cmd, text=True)
     if result.returncode != 0:
         return False
