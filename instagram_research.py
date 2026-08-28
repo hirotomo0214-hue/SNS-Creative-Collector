@@ -11,6 +11,10 @@ from playwright.sync_api import sync_playwright
 POST_RE = re.compile(r"^https://www\.instagram\.com/(?:p|reel)/[^/?#]+/?$")
 
 
+class SessionInvalid(RuntimeError):
+    pass
+
+
 def storage_states() -> list[Path]:
     raw = os.environ.get("IG_STORAGE_STATE_FILES", "")
     return [Path(p) for p in raw.split(":") if p and Path(p).is_file()]
@@ -43,7 +47,7 @@ def collect_links(page, search_url: str, max_scrolls: int = 8) -> set[str]:
     page.goto(search_url, wait_until="domcontentloaded", timeout=90000)
     page.wait_for_timeout(5000)
     if not session_valid(page):
-        raise RuntimeError("Instagram session invalid or challenged")
+        raise SessionInvalid("Instagram session invalid or challenged")
 
     links: set[str] = set()
     for _ in range(max_scrolls):
@@ -59,11 +63,33 @@ def collect_links(page, search_url: str, max_scrolls: int = 8) -> set[str]:
     return links
 
 
+def parse_public_metrics(description: str) -> tuple[int | None, int | None]:
+    likes = None
+    comments = None
+    m = re.search(r"([\d,]+)\s+likes?,\s*([\d,]+)\s+comments?", description, re.IGNORECASE)
+    if m:
+        likes = int(m.group(1).replace(",", ""))
+        comments = int(m.group(2).replace(",", ""))
+    return likes, comments
+
+
+def extract_account(description: str) -> str:
+    m = re.search(
+        r"[\d,]+\s+likes?,\s*[\d,]+\s+comments?\s*-\s*([A-Za-z0-9._]+)\s*:",
+        description,
+        re.IGNORECASE,
+    )
+    if m:
+        return m.group(1)
+    m = re.search(r"@([A-Za-z0-9._]+)", description)
+    return m.group(1) if m else ""
+
+
 def extract_post(page, url: str, cutoff: datetime) -> dict | None:
     page.goto(url, wait_until="domcontentloaded", timeout=90000)
     page.wait_for_timeout(3500)
     if not session_valid(page):
-        raise RuntimeError("Instagram session invalid or challenged")
+        raise SessionInvalid("Instagram session invalid or challenged")
 
     dt = None
     try:
@@ -86,17 +112,16 @@ def extract_post(page, url: str, cutoff: datetime) -> dict | None:
     except Exception:
         pass
 
-    account = ""
-    m = re.search(r"@([A-Za-z0-9._]+)", description)
-    if m:
-        account = m.group(1)
-
+    account = extract_account(description)
+    likes, comments = parse_public_metrics(description)
     kind = "reel" if "/reel/" in url else "feed"
     return {
         "url": url,
         "type": kind,
         "posted_at": dt.astimezone(timezone.utc).isoformat(),
         "account": account,
+        "likes": likes,
+        "comments": comments,
         "description": description[:1500],
     }
 
@@ -131,7 +156,7 @@ def main() -> None:
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        session_index = 0
+        active_idx = 0
 
         def make_context(index: int):
             return browser.new_context(
@@ -144,50 +169,74 @@ def main() -> None:
                 ),
             )
 
-        for keyword, search_url in search_sources:
-            worked = False
-            for offset in range(len(states)):
-                idx = (session_index + offset) % len(states)
+        def search_with_active_session(keyword: str, search_url: str) -> set[str] | None:
+            nonlocal active_idx
+            idx = active_idx
+            while idx < len(states):
                 context = make_context(idx)
                 page = context.new_page()
                 try:
                     links = collect_links(page, search_url)
-                    candidate_urls.update(links)
-                    print(f"Search '{keyword}' via session {idx + 1}: {len(links)} links")
-                    session_index = (idx + 1) % len(states)
-                    worked = True
-                    break
+                    if idx != active_idx:
+                        active_idx = idx
+                        print(f"Instagram fallback activated: session {active_idx + 1}")
+                    print(f"Search '{keyword}' via session {active_idx + 1}: {len(links)} links")
+                    return links
+                except SessionInvalid as exc:
+                    errors.append({"stage": "search", "keyword": keyword, "session": idx + 1, "error": str(exc)})
+                    print(f"Instagram session {idx + 1} invalid; trying next configured session")
+                    idx += 1
                 except Exception as exc:
                     errors.append({"stage": "search", "keyword": keyword, "session": idx + 1, "error": str(exc)})
+                    print(f"Search error for '{keyword}' on session {idx + 1}: {exc}")
+                    return None
                 finally:
                     context.close()
-            if not worked:
-                print(f"Search failed for '{keyword}' on all sessions")
+            return None
 
-        for url in sorted(candidate_urls):
-            if len(results) >= args.max_posts:
-                break
-            worked = False
-            for offset in range(len(states)):
-                idx = (session_index + offset) % len(states)
+        def post_with_active_session(url: str) -> tuple[bool, dict | None]:
+            nonlocal active_idx
+            idx = active_idx
+            while idx < len(states):
                 context = make_context(idx)
                 page = context.new_page()
                 try:
                     item = extract_post(page, url, cutoff)
-                    if item:
-                        haystack = (item.get("description") or "").lower()
-                        matched = [k for k in keywords if k.lower() in haystack]
-                        item["matched_keywords"] = matched
-                        results.append(item)
-                    session_index = (idx + 1) % len(states)
-                    worked = True
-                    break
+                    if idx != active_idx:
+                        active_idx = idx
+                        print(f"Instagram fallback activated: session {active_idx + 1}")
+                    return True, item
+                except SessionInvalid as exc:
+                    errors.append({"stage": "post", "url": url, "session": idx + 1, "error": str(exc)})
+                    print(f"Instagram session {idx + 1} invalid; trying next configured session")
+                    idx += 1
                 except Exception as exc:
                     errors.append({"stage": "post", "url": url, "session": idx + 1, "error": str(exc)})
+                    print(f"Post error on session {idx + 1}: {url}: {exc}")
+                    return False, None
                 finally:
                     context.close()
+            return False, None
+
+        for keyword, search_url in search_sources:
+            links = search_with_active_session(keyword, search_url)
+            if links is not None:
+                candidate_urls.update(links)
+            else:
+                print(f"Search failed for '{keyword}'")
+
+        for candidate_index, url in enumerate(sorted(candidate_urls), start=1):
+            if len(results) >= args.max_posts:
+                break
+            print(f"Candidate {candidate_index}/{len(candidate_urls)}: {url}")
+            worked, item = post_with_active_session(url)
             if not worked:
-                print(f"Post failed on all sessions: {url}")
+                continue
+            if item:
+                haystack = (item.get("description") or "").lower()
+                matched = [k for k in keywords if k.lower() in haystack]
+                item["matched_keywords"] = matched
+                results.append(item)
 
         browser.close()
 
