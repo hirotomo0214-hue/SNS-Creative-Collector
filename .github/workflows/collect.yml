@@ -82,13 +82,20 @@ jobs:
 
       - name: Prepare YouTube cookies
         env:
-          YOUTUBE_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
+          YOUTUBE_COOKIES_PART_AA: ${{ secrets.YOUTUBE_COOKIES_PART_AA }}
+          YOUTUBE_COOKIES_PART_AB: ${{ secrets.YOUTUBE_COOKIES_PART_AB }}
         run: |
-          if [ -n "$YOUTUBE_COOKIES" ]; then
+          if [ -n "$YOUTUBE_COOKIES_PART_AA" ] && [ -n "$YOUTUBE_COOKIES_PART_AB" ]; then
+            COOKIE_B64="$RUNNER_TEMP/youtube_cookies_gz_b64.txt"
+            COOKIE_GZ="$RUNNER_TEMP/youtube_cookies.txt.gz"
             COOKIE_FILE="$RUNNER_TEMP/youtube_cookies.txt"
-            printf '%s' "$YOUTUBE_COOKIES" > "$COOKIE_FILE"
+            printf '%s%s' "$YOUTUBE_COOKIES_PART_AA" "$YOUTUBE_COOKIES_PART_AB" > "$COOKIE_B64"
+            base64 --decode "$COOKIE_B64" > "$COOKIE_GZ"
+            gzip -dc "$COOKIE_GZ" > "$COOKIE_FILE"
             chmod 600 "$COOKIE_FILE"
             echo "YT_COOKIES_FILE=$COOKIE_FILE" >> "$GITHUB_ENV"
+            echo "YT_COOKIES_B64_FILE=$COOKIE_B64" >> "$GITHUB_ENV"
+            echo "YT_COOKIES_GZ_FILE=$COOKIE_GZ" >> "$GITHUB_ENV"
           fi
 
       - name: Collect creative
@@ -120,6 +127,4 @@ jobs:
       - name: Remove temporary YouTube cookies
         if: always()
         run: |
-          if [ -n "${YT_COOKIES_FILE:-}" ]; then
-            rm -f "$YT_COOKIES_FILE"
-          fi
+          rm -f "${YT_COOKIES_FILE:-}" "${YT_COOKIES_B64_FILE:-}" "${YT_COOKIES_GZ_FILE:-}"
