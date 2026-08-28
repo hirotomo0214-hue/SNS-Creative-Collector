@@ -22,10 +22,11 @@ on:
           - video
   issues:
     types: [opened]
+  push:
+    branches: [main]
 
 jobs:
   collect:
-    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.issue.title, '[collect]')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -43,32 +44,41 @@ jobs:
       - name: Resolve inputs
         id: inputs
         shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          INPUT_URL: ${{ inputs.url }}
+          INPUT_FOLDER: ${{ inputs.folder_name }}
+          INPUT_MODE: ${{ inputs.mode }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            URL='${{ inputs.url }}'
-            FOLDER='${{ inputs.folder_name }}'
-            MODE='${{ inputs.mode }}'
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            URL="$INPUT_URL"
+            FOLDER="$INPUT_FOLDER"
+            MODE="$INPUT_MODE"
+          elif [ "$EVENT_NAME" = "issues" ]; then
+            if [[ "$ISSUE_TITLE" != \[collect\]* ]]; then
+              echo "Not a collector issue."
+              exit 0
+            fi
+            URL=$(printf '%s\n' "$ISSUE_BODY" | sed -n 's/^url:[[:space:]]*//p' | head -n1)
+            FOLDER=$(printf '%s\n' "$ISSUE_BODY" | sed -n 's/^folder_name:[[:space:]]*//p' | head -n1)
+            MODE=$(printf '%s\n' "$ISSUE_BODY" | sed -n 's/^mode:[[:space:]]*//p' | head -n1)
           else
-            python - <<'PY'
-          import os, re
-          from pathlib import Path
-          body = os.environ.get('ISSUE_BODY','')
-          def get(key, default=''):
-              m = re.search(rf'^{key}:\s*(.+)$', body, re.M)
-              return m.group(1).strip() if m else default
-          out = Path(os.environ['GITHUB_OUTPUT'])
-          with out.open('a') as f:
-              f.write(f"url={get('url')}\n")
-              f.write(f"folder={get('folder_name')}\n")
-              f.write(f"mode={get('mode','auto')}\n")
-          PY
-            exit 0
+            URL='https://x.com/Show_SylveSTAR/status/1938194153466450214'
+            FOLDER='20260828_Teaflex_Show_SylveSTAR'
+            MODE='image'
           fi
+
+          if [ -z "$URL" ] || [ -z "$FOLDER" ]; then
+            echo "Missing URL or folder name"
+            exit 1
+          fi
+          if [ -z "$MODE" ]; then MODE='auto'; fi
+
           echo "url=$URL" >> "$GITHUB_OUTPUT"
           echo "folder=$FOLDER" >> "$GITHUB_OUTPUT"
           echo "mode=$MODE" >> "$GITHUB_OUTPUT"
-        env:
-          ISSUE_BODY: ${{ github.event.issue.body }}
 
       - name: Collect creative
         run: |
