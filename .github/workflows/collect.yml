@@ -95,6 +95,31 @@ jobs:
             echo "YT_COOKIES_GZ_FILE=$COOKIE_GZ" >> "$GITHUB_ENV"
           fi
 
+      - name: Prepare Instagram sessions
+        env:
+          IG_STORAGE_STATE_01: ${{ secrets.IG_STORAGE_STATE_01 }}
+          IG_STORAGE_STATE_02: ${{ secrets.IG_STORAGE_STATE_02 }}
+          IG_STORAGE_STATE_03: ${{ secrets.IG_STORAGE_STATE_03 }}
+        run: |
+          FILES=""
+          for N in 01 02 03; do
+            VAR="IG_STORAGE_STATE_${N}"
+            VALUE="${!VAR}"
+            if [ -n "$VALUE" ]; then
+              FILE="$RUNNER_TEMP/ig_storage_state_${N}.json"
+              printf '%s' "$VALUE" > "$FILE"
+              chmod 600 "$FILE"
+              if [ -z "$FILES" ]; then
+                FILES="$FILE"
+              else
+                FILES="$FILES:$FILE"
+              fi
+            fi
+          done
+          if [ -n "$FILES" ]; then
+            echo "IG_STORAGE_STATE_FILES=$FILES" >> "$GITHUB_ENV"
+          fi
+
       - name: Collect creative
         run: |
           python collector.py \
@@ -121,7 +146,15 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      - name: Remove temporary YouTube cookies
+      - name: Remove temporary session files
         if: always()
         run: |
           rm -f "${YT_COOKIES_FILE:-}" "${YT_COOKIES_B64_FILE:-}" "${YT_COOKIES_GZ_FILE:-}"
+          if [ -n "${IG_STORAGE_STATE_FILES:-}" ]; then
+            OLDIFS="$IFS"
+            IFS=':'
+            for FILE in $IG_STORAGE_STATE_FILES; do
+              rm -f "$FILE"
+            done
+            IFS="$OLDIFS"
+          fi
