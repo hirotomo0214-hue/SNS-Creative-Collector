@@ -80,6 +80,17 @@ jobs:
           echo "folder=$FOLDER" >> "$GITHUB_OUTPUT"
           echo "mode=$MODE" >> "$GITHUB_OUTPUT"
 
+      - name: Prepare YouTube cookies
+        env:
+          YOUTUBE_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
+        run: |
+          if [ -n "$YOUTUBE_COOKIES" ]; then
+            COOKIE_FILE="$RUNNER_TEMP/youtube_cookies.txt"
+            printf '%s' "$YOUTUBE_COOKIES" > "$COOKIE_FILE"
+            chmod 600 "$COOKIE_FILE"
+            echo "YT_COOKIES_FILE=$COOKIE_FILE" >> "$GITHUB_ENV"
+          fi
+
       - name: Collect creative
         run: |
           python collector.py \
@@ -105,3 +116,10 @@ jobs:
           path: output/${{ steps.inputs.outputs.folder }}/
           if-no-files-found: error
           retention-days: 7
+
+      - name: Remove temporary YouTube cookies
+        if: always()
+        run: |
+          if [ -n "${YT_COOKIES_FILE:-}" ]; then
+            rm -f "$YT_COOKIES_FILE"
+          fi
