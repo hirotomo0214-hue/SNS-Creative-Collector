@@ -113,12 +113,13 @@ jobs:
             --require-japanese \
             --output instagram_research.json
 
-      - name: Select and deduplicate research candidates
+      - name: Select, deduplicate, and prepare Notion queue
         run: |
           python research_selector.py \
             --input instagram_research.json \
             --known-urls known_notion_urls.json \
             --output research_selection.json \
+            --queue-output notion_save_queue.json \
             --auto-threshold 5
 
       - name: Upload research result
@@ -128,6 +129,7 @@ jobs:
           path: |
             instagram_research.json
             research_selection.json
+            notion_save_queue.json
           if-no-files-found: error
           retention-days: 7
 
