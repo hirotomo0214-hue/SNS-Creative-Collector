@@ -2,9 +2,12 @@ name: Trend Analysis
 
 on:
   workflow_dispatch:
+  issues:
+    types: [opened, edited, reopened]
 
 jobs:
   analyze:
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.issue.title, '[trend-analysis]')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
