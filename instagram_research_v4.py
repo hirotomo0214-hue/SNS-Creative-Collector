@@ -14,6 +14,7 @@ MONTHS = {m.lower(): i for i, m in enumerate([
     "", "January", "February", "March", "April", "May", "June",
     "July", "August", "September", "October", "November", "December"
 ]) if m}
+USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 
 
 class SessionInvalid(RuntimeError):
@@ -149,7 +150,7 @@ def account_from(description):
 
 def extract_post(page, url, cutoff, now):
     page.goto(url, wait_until="domcontentloaded", timeout=90000)
-    page.wait_for_timeout(3000)
+    page.wait_for_timeout(4500)
     if not session_valid(page):
         raise SessionInvalid("Instagram session invalid or challenged")
 
@@ -168,6 +169,7 @@ def extract_post(page, url, cutoff, now):
             "page_url": page.url,
             "title": page.title()[:200],
             "description_preview": description[:300],
+            "body_preview": (page.locator("body").inner_text()[:500] if page.locator("body").count() else ""),
             "date_diagnostics": diagnostics,
         }
     if dt > now + timedelta(days=1):
@@ -222,7 +224,12 @@ def main():
         browser = p.chromium.launch(headless=True)
 
         def make_context(index):
-            return browser.new_context(storage_state=str(states[index]), locale="ja-JP", viewport={"width": 1440, "height": 1800})
+            return browser.new_context(
+                storage_state=str(states[index]),
+                locale="ja-JP",
+                viewport={"width": 1440, "height": 1800},
+                user_agent=USER_AGENT,
+            )
 
         for keyword in keywords:
             for search_url in [
