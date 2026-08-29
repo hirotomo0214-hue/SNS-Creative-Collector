@@ -24,7 +24,7 @@ on:
         default: '30'
         type: string
       max_candidates:
-        description: Maximum discovered candidates to inspect in detail
+        description: Maximum GraphQL candidates to inspect
         required: true
         default: '30'
         type: string
@@ -88,13 +88,9 @@ jobs:
           done
           if [ -z "$FILES" ]; then echo "No Instagram storageState secrets are configured"; exit 1; fi
           echo "IG_STORAGE_STATE_FILES=$FILES" >> "$GITHUB_ENV"
-      - name: Probe Instagram search page
-        run: python instagram_search_probe.py --keyword "ティーフレックス" --max-items 10 --output instagram_search_probe.json
-      - name: Probe Instagram GraphQL metadata
-        run: python instagram_graphql_probe.py --keyword "ティーフレックス" --output instagram_graphql_probe.json
-      - name: Research Instagram
+      - name: Research Instagram via GraphQL metadata
         run: |
-          python instagram_research_v4.py \
+          python instagram_research_v5.py \
             --keywords "${{ steps.inputs.outputs.keywords }}" \
             --anchor-keywords "${{ steps.inputs.outputs.anchor_keywords }}" \
             --days "${{ steps.inputs.outputs.days }}" \
@@ -108,8 +104,6 @@ jobs:
         with:
           name: instagram-research-result
           path: |
-            instagram_search_probe.json
-            instagram_graphql_probe.json
             instagram_research.json
             research_selection.json
             notion_save_queue.json
