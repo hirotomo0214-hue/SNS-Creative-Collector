@@ -113,10 +113,11 @@ jobs:
             --require-japanese \
             --output instagram_research.json
 
-      - name: Select research-worthy candidates
+      - name: Select and deduplicate research candidates
         run: |
           python research_selector.py \
             --input instagram_research.json \
+            --known-urls known_notion_urls.json \
             --output research_selection.json \
             --auto-threshold 5
 
