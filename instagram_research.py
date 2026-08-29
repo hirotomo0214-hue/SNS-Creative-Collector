@@ -9,6 +9,20 @@ from urllib.parse import quote
 from playwright.sync_api import sync_playwright
 
 POST_RE = re.compile(r"^https://www\.instagram\.com/(?:p|reel)/[^/?#]+/?$")
+MONTHS = {
+    "january": 1,
+    "february": 2,
+    "march": 3,
+    "april": 4,
+    "may": 5,
+    "june": 6,
+    "july": 7,
+    "august": 8,
+    "september": 9,
+    "october": 10,
+    "november": 11,
+    "december": 12,
+}
 
 
 class SessionInvalid(RuntimeError):
@@ -74,15 +88,16 @@ def parse_public_metrics(description: str) -> tuple[int | None, int | None]:
 
 
 def extract_account(description: str) -> str:
-    m = re.search(
+    patterns = [
         r"[\d,]+\s+likes?,\s*[\d,]+\s+comments?\s*-\s*([A-Za-z0-9._]+)\s*:",
-        description,
-        re.IGNORECASE,
-    )
-    if m:
-        return m.group(1)
-    m = re.search(r"@([A-Za-z0-9._]+)", description)
-    return m.group(1) if m else ""
+        r"^[A-Za-z]+\s+\d{1,2},\s+\d{4}、([A-Za-z0-9._]+)\s*:",
+        r"@([A-Za-z0-9._]+)",
+    ]
+    for pattern in patterns:
+        m = re.search(pattern, description, re.IGNORECASE)
+        if m:
+            return m.group(1)
+    return ""
 
 
 def parse_iso_datetime(raw: str | None) -> datetime | None:
@@ -97,10 +112,28 @@ def parse_iso_datetime(raw: str | None) -> datetime | None:
         return None
 
 
-def extract_post_datetime(page) -> datetime | None:
-    candidates: list[datetime] = []
+def parse_description_date(description: str) -> datetime | None:
+    # Instagram og:description commonly starts with e.g. "August 27, 2026、...".
+    # This is the visible post date and is more reliable than unrelated <time>
+    # nodes elsewhere in Instagram's page shell.
+    m = re.match(r"^([A-Za-z]+)\s+(\d{1,2}),\s+(\d{4})、", description.strip())
+    if not m:
+        return None
+    month = MONTHS.get(m.group(1).lower())
+    if not month:
+        return None
+    try:
+        return datetime(int(m.group(3)), month, int(m.group(2)), tzinfo=timezone.utc)
+    except ValueError:
+        return None
 
-    # Current Instagram pages may expose publication time through metadata.
+
+def extract_post_datetime(page, description: str) -> tuple[datetime | None, str | None]:
+    description_dt = parse_description_date(description)
+    if description_dt:
+        return description_dt, "og_description"
+
+    # Fallback only when the visible date is unavailable.
     for selector, attribute in [
         ('meta[property="article:published_time"]', "content"),
         ('meta[name="article:published_time"]', "content"),
@@ -112,13 +145,10 @@ def extract_post_datetime(page) -> datetime | None:
             for i in range(count):
                 dt = parse_iso_datetime(locator.nth(i).get_attribute(attribute))
                 if dt:
-                    candidates.append(dt)
+                    return dt, selector
         except Exception:
             pass
-
-    # Prefer the newest valid timestamp on the post page. This avoids unrelated
-    # older timestamps that can appear in surrounding Instagram UI.
-    return max(candidates) if candidates else None
+    return None, None
 
 
 def extract_post(page, url: str, cutoff: datetime) -> tuple[dict | None, str | None]:
@@ -126,12 +156,6 @@ def extract_post(page, url: str, cutoff: datetime) -> tuple[dict | None, str | N
     page.wait_for_timeout(3500)
     if not session_valid(page):
         raise SessionInvalid("Instagram session invalid or challenged")
-
-    dt = extract_post_datetime(page)
-    if dt is None:
-        return None, "date_missing"
-    if dt < cutoff:
-        return None, "outside_window"
 
     description = ""
     try:
@@ -141,6 +165,12 @@ def extract_post(page, url: str, cutoff: datetime) -> tuple[dict | None, str | N
     except Exception:
         pass
 
+    dt, date_source = extract_post_datetime(page, description)
+    if dt is None:
+        return None, "date_missing"
+    if dt < cutoff:
+        return None, "outside_window"
+
     account = extract_account(description)
     likes, comments = parse_public_metrics(description)
     kind = "reel" if "/reel/" in url else "feed"
@@ -148,6 +178,7 @@ def extract_post(page, url: str, cutoff: datetime) -> tuple[dict | None, str | N
         "url": url,
         "type": kind,
         "posted_at": dt.isoformat(),
+        "date_source": date_source,
         "account": account,
         "likes": likes,
         "comments": comments,
