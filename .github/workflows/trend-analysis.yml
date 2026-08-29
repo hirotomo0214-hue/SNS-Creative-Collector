@@ -1,0 +1,42 @@
+name: Trend Analysis
+
+on:
+  workflow_dispatch:
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Aggregate SNS research patterns
+        run: |
+          python trend_aggregator.py \
+            --input trend_test_snapshot.json \
+            --output trend_report.json \
+            --as-of 2026-08-29 \
+            --current-days 7 \
+            --baseline-days 28 \
+            --min-posts 2
+      - name: Validate normalization and output
+        run: |
+          python - <<'PY'
+          import json
+          d=json.load(open('trend_report.json', encoding='utf-8'))
+          assert d['duplicate_rows_removed'] >= 2, d
+          assert d['current_usable_rows'] > 0, d
+          assert isinstance(d['signals'], list), d
+          print('duplicates_removed=', d['duplicate_rows_removed'])
+          print('current_usable_rows=', d['current_usable_rows'])
+          print('missing_classification=', d['missing_classification_count'])
+          print('signals=', len(d['signals']))
+          for s in d['signals'][:10]:
+              print(s['status'], s['kind'], s['name'], s['current_posts'], s['current_accounts'], s['rate_lift'], s['trend_score'])
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: trend-analysis-result
+          path: trend_report.json
+          retention-days: 7
