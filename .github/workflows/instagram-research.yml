@@ -122,6 +122,15 @@ jobs:
             --queue-output notion_save_queue.json \
             --auto-threshold 5
 
+      - name: Persist research candidates to Notion
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_DATA_SOURCE_ID: ${{ secrets.NOTION_DATA_SOURCE_ID }}
+        run: |
+          python notion_persist.py \
+            --queue notion_save_queue.json \
+            --result notion_persist_result.json
+
       - name: Upload research result
         uses: actions/upload-artifact@v4
         with:
@@ -130,6 +139,7 @@ jobs:
             instagram_research.json
             research_selection.json
             notion_save_queue.json
+            notion_persist_result.json
           if-no-files-found: error
           retention-days: 7
 
