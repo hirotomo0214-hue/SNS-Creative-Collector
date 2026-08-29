@@ -113,11 +113,20 @@ jobs:
             --require-japanese \
             --output instagram_research.json
 
+      - name: Select research-worthy candidates
+        run: |
+          python research_selector.py \
+            --input instagram_research.json \
+            --output research_selection.json \
+            --auto-threshold 5
+
       - name: Upload research result
         uses: actions/upload-artifact@v4
         with:
           name: instagram-research-result
-          path: instagram_research.json
+          path: |
+            instagram_research.json
+            research_selection.json
           if-no-files-found: error
           retention-days: 7
 
