@@ -63,10 +63,43 @@ def load_known_urls(path: str | None) -> set[str]:
     return {str(value).strip() for value in values if str(value).strip()}
 
 
+def build_notion_queue_item(post: dict) -> dict:
+    account = str(post.get("account") or "").strip()
+    posted_at = str(post.get("posted_at") or "")
+    posted_date = posted_at[:10] if posted_at else ""
+    return {
+        "idempotency_key": str(post.get("url") or "").strip(),
+        "status": "pending_live_duplicate_check",
+        "target": "Notion [DB]インフルエンサー クリエイティブ収集",
+        "properties": {
+            "動画URL": str(post.get("url") or "").strip(),
+            "アカウントURL": f"https://www.instagram.com/{account}/" if account else "",
+            "投稿日": posted_date,
+            "取得元": "SNSバズ研究",
+            "媒体": "Instagram",
+            "投稿形態": "他社リール" if post.get("type") == "reel" else "他社フィード",
+        },
+        "observations": {
+            "likes": post.get("likes"),
+            "comments": post.get("comments"),
+            "research_score": post.get("research_score"),
+            "research_reasons": post.get("research_reasons", []),
+            "description": post.get("description", ""),
+            "matched_anchor_keywords": post.get("matched_anchor_keywords", []),
+        },
+        "safety": {
+            "require_live_notion_duplicate_check": True,
+            "do_not_overwrite_existing": True,
+            "causal_performance_claim_allowed": False,
+        },
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", required=True)
     parser.add_argument("--output", default="research_selection.json")
+    parser.add_argument("--queue-output", default="notion_save_queue.json")
     parser.add_argument("--auto-threshold", type=int, default=5)
     parser.add_argument("--known-urls", default="")
     args = parser.parse_args()
@@ -109,19 +142,27 @@ def main() -> None:
         "policy": {
             "purpose": "Conservative research-value gate before Notion persistence",
             "notes": [
-                "This stage does not write to Notion.",
                 "Known Notion URLs are removed before persistence candidates are emitted.",
                 "The URL ledger is a safety cache; live Notion duplicate checking is still required immediately before write.",
                 "A high score means research-worthy candidate, not proven causal performance."
             ]
         }
     }
+    queue = {
+        "generated_at": payload.get("generated_at"),
+        "queue_version": 1,
+        "pending_count": len(selected),
+        "items": [build_notion_queue_item(item) for item in selected],
+    }
+
     Path(args.output).write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
+    Path(args.queue_output).write_text(json.dumps(queue, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"Known Notion URLs: {len(known_urls)}")
     print(f"Duplicates removed: {len(duplicates)}")
     print(f"Save candidates: {len(selected)}")
     print(f"Manual review: {len(review)}")
-    print(f"Saved: {args.output}")
+    print(f"Saved selection: {args.output}")
+    print(f"Saved Notion queue: {args.queue_output}")
 
 
 if __name__ == "__main__":
