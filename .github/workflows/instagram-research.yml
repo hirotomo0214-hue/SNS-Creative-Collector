@@ -53,11 +53,7 @@ jobs:
           INPUT_MAX_CANDIDATES: ${{ inputs.max_candidates }}
         run: |
           if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
-            KEYWORDS="$INPUT_KEYWORDS"
-            ANCHOR_KEYWORDS="$INPUT_ANCHOR_KEYWORDS"
-            DAYS="$INPUT_DAYS"
-            MAX_POSTS="$INPUT_MAX_POSTS"
-            MAX_CANDIDATES="$INPUT_MAX_CANDIDATES"
+            KEYWORDS="$INPUT_KEYWORDS"; ANCHOR_KEYWORDS="$INPUT_ANCHOR_KEYWORDS"; DAYS="$INPUT_DAYS"; MAX_POSTS="$INPUT_MAX_POSTS"; MAX_CANDIDATES="$INPUT_MAX_CANDIDATES"
           else
             KEYWORDS=$(printf '%s\n' "$ISSUE_BODY" | sed -n 's/^keywords:[[:space:]]*//p' | head -n1)
             ANCHOR_KEYWORDS=$(printf '%s\n' "$ISSUE_BODY" | sed -n 's/^anchor_keywords:[[:space:]]*//p' | head -n1)
@@ -67,14 +63,8 @@ jobs:
           fi
           [ -n "$KEYWORDS" ] || KEYWORDS='ティーフレックス,Teaflex,グリーンティー'
           [ -n "$ANCHOR_KEYWORDS" ] || ANCHOR_KEYWORDS='ティーフレックス,Teaflex'
-          [ -n "$DAYS" ] || DAYS='7'
-          [ -n "$MAX_POSTS" ] || MAX_POSTS='30'
-          [ -n "$MAX_CANDIDATES" ] || MAX_CANDIDATES='30'
-          echo "keywords=$KEYWORDS" >> "$GITHUB_OUTPUT"
-          echo "anchor_keywords=$ANCHOR_KEYWORDS" >> "$GITHUB_OUTPUT"
-          echo "days=$DAYS" >> "$GITHUB_OUTPUT"
-          echo "max_posts=$MAX_POSTS" >> "$GITHUB_OUTPUT"
-          echo "max_candidates=$MAX_CANDIDATES" >> "$GITHUB_OUTPUT"
+          [ -n "$DAYS" ] || DAYS='7'; [ -n "$MAX_POSTS" ] || MAX_POSTS='30'; [ -n "$MAX_CANDIDATES" ] || MAX_CANDIDATES='30'
+          echo "keywords=$KEYWORDS" >> "$GITHUB_OUTPUT"; echo "anchor_keywords=$ANCHOR_KEYWORDS" >> "$GITHUB_OUTPUT"; echo "days=$DAYS" >> "$GITHUB_OUTPUT"; echo "max_posts=$MAX_POSTS" >> "$GITHUB_OUTPUT"; echo "max_candidates=$MAX_CANDIDATES" >> "$GITHUB_OUTPUT"
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -90,17 +80,16 @@ jobs:
           set -e
           FILES=""
           for N in 01 02 03; do
-            VAR="IG_STORAGE_STATE_${N}"
-            VALUE="${!VAR:-}"
+            VAR="IG_STORAGE_STATE_${N}"; VALUE="${!VAR:-}"
             if [ -n "$VALUE" ]; then
-              FILE="$RUNNER_TEMP/instagram_state_${N}.json"
-              printf '%s' "$VALUE" | base64 --decode > "$FILE"
-              chmod 600 "$FILE"
+              FILE="$RUNNER_TEMP/instagram_state_${N}.json"; printf '%s' "$VALUE" | base64 --decode > "$FILE"; chmod 600 "$FILE"
               if [ -z "$FILES" ]; then FILES="$FILE"; else FILES="$FILES:$FILE"; fi
             fi
           done
           if [ -z "$FILES" ]; then echo "No Instagram storageState secrets are configured"; exit 1; fi
           echo "IG_STORAGE_STATE_FILES=$FILES" >> "$GITHUB_ENV"
+      - name: Probe Instagram search page
+        run: python instagram_search_probe.py --keyword "ティーフレックス" --max-items 10 --output instagram_search_probe.json
       - name: Research Instagram
         run: |
           python instagram_research_v4.py \
@@ -109,21 +98,15 @@ jobs:
             --days "${{ steps.inputs.outputs.days }}" \
             --max-posts "${{ steps.inputs.outputs.max_posts }}" \
             --max-candidates "${{ steps.inputs.outputs.max_candidates }}" \
-            --require-japanese \
-            --output instagram_research.json
+            --require-japanese --output instagram_research.json
       - name: Select, deduplicate, and prepare Notion queue
-        run: |
-          python research_selector.py \
-            --input instagram_research.json \
-            --known-urls known_notion_urls.json \
-            --output research_selection.json \
-            --queue-output notion_save_queue.json \
-            --auto-threshold 5
+        run: python research_selector.py --input instagram_research.json --known-urls known_notion_urls.json --output research_selection.json --queue-output notion_save_queue.json --auto-threshold 5
       - name: Upload research result
         uses: actions/upload-artifact@v4
         with:
           name: instagram-research-result
           path: |
+            instagram_search_probe.json
             instagram_research.json
             research_selection.json
             notion_save_queue.json
