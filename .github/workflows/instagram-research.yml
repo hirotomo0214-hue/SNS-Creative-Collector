@@ -90,6 +90,8 @@ jobs:
           echo "IG_STORAGE_STATE_FILES=$FILES" >> "$GITHUB_ENV"
       - name: Probe Instagram search page
         run: python instagram_search_probe.py --keyword "ティーフレックス" --max-items 10 --output instagram_search_probe.json
+      - name: Probe Instagram GraphQL metadata
+        run: python instagram_graphql_probe.py --keyword "ティーフレックス" --output instagram_graphql_probe.json
       - name: Research Instagram
         run: |
           python instagram_research_v4.py \
@@ -107,6 +109,7 @@ jobs:
           name: instagram-research-result
           path: |
             instagram_search_probe.json
+            instagram_graphql_probe.json
             instagram_research.json
             research_selection.json
             notion_save_queue.json
