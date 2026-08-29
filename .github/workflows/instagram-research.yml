@@ -95,7 +95,7 @@ jobs:
 
       - name: Research Instagram
         run: |
-          python instagram_research.py \
+          python instagram_research_v2.py \
             --keywords "${{ steps.inputs.outputs.keywords }}" \
             --days "${{ steps.inputs.outputs.days }}" \
             --max-posts "${{ steps.inputs.outputs.max_posts }}" \
