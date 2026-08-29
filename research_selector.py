@@ -47,23 +47,48 @@ def score_post(post: dict) -> tuple[int, list[str]]:
     return score, reasons
 
 
+def load_known_urls(path: str | None) -> set[str]:
+    if not path:
+        return set()
+    file_path = Path(path)
+    if not file_path.exists():
+        return set()
+    payload = json.loads(file_path.read_text(encoding="utf-8"))
+    if isinstance(payload, dict):
+        values = payload.get("urls", [])
+    elif isinstance(payload, list):
+        values = payload
+    else:
+        values = []
+    return {str(value).strip() for value in values if str(value).strip()}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", required=True)
     parser.add_argument("--output", default="research_selection.json")
     parser.add_argument("--auto-threshold", type=int, default=5)
+    parser.add_argument("--known-urls", default="")
     args = parser.parse_args()
 
     payload = json.loads(Path(args.input).read_text(encoding="utf-8"))
+    known_urls = load_known_urls(args.known_urls)
     selected = []
     review = []
+    duplicates = []
 
     for post in payload.get("posts", []):
         score, reasons = score_post(post)
         item = dict(post)
         item["research_score"] = score
         item["research_reasons"] = reasons
-        if score >= args.auto_threshold:
+        url = str(item.get("url") or "").strip()
+
+        if url and url in known_urls:
+            item["research_decision"] = "duplicate_existing"
+            item["research_reasons"] = reasons + ["notion_url_duplicate"]
+            duplicates.append(item)
+        elif score >= args.auto_threshold:
             item["research_decision"] = "save_candidate"
             selected.append(item)
         else:
@@ -73,21 +98,27 @@ def main() -> None:
     out = {
         "generated_at": payload.get("generated_at"),
         "source_candidate_count": payload.get("accepted_post_count", len(payload.get("posts", []))),
+        "known_url_count": len(known_urls),
+        "duplicate_existing_count": len(duplicates),
         "save_candidate_count": len(selected),
         "manual_review_count": len(review),
         "auto_threshold": args.auto_threshold,
         "save_candidates": selected,
+        "duplicate_existing": duplicates,
         "manual_review": review,
         "policy": {
             "purpose": "Conservative research-value gate before Notion persistence",
             "notes": [
                 "This stage does not write to Notion.",
-                "Notion URL duplicate checking remains mandatory before persistence.",
+                "Known Notion URLs are removed before persistence candidates are emitted.",
+                "The URL ledger is a safety cache; live Notion duplicate checking is still required immediately before write.",
                 "A high score means research-worthy candidate, not proven causal performance."
             ]
         }
     }
     Path(args.output).write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"Known Notion URLs: {len(known_urls)}")
+    print(f"Duplicates removed: {len(duplicates)}")
     print(f"Save candidates: {len(selected)}")
     print(f"Manual review: {len(review)}")
     print(f"Saved: {args.output}")
