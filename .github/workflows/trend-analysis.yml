@@ -38,8 +38,32 @@ jobs:
           for s in d['signals'][:10]:
               print(s['status'], s['kind'], s['name'], s['current_posts'], s['current_accounts'], s['rate_lift'], s['trend_score'])
           PY
+      - name: Generate Teaflex transfer recommendations
+        run: |
+          python recommendation_generator.py \
+            --trend trend_report.json \
+            --snapshot trend_test_snapshot.json \
+            --project 'Teaflex(ティーフレックス)' \
+            --output campaign_recommendations.json
+      - name: Validate recommendation output
+        run: |
+          python - <<'PY'
+          import json
+          d=json.load(open('campaign_recommendations.json', encoding='utf-8'))
+          assert d['mode'] == 'initial_signal', d
+          assert d['project_rows_in_snapshot'] >= 1, d
+          assert len(d['signals_used']) >= 1, d
+          assert len(d['recommendations']) >= 1, d
+          print('project=', d['project'])
+          print('project_rows=', d['project_rows_in_snapshot'])
+          print('recommendations=', len(d['recommendations']))
+          for r in d['recommendations']:
+              print(r['priority'], r['hypothesis'])
+          PY
       - uses: actions/upload-artifact@v4
         with:
           name: trend-analysis-result
-          path: trend_report.json
+          path: |
+            trend_report.json
+            campaign_recommendations.json
           retention-days: 7
