@@ -4,9 +4,14 @@ on:
   workflow_dispatch:
     inputs:
       keywords:
-        description: Comma-separated Instagram research keywords
+        description: Comma-separated Instagram discovery keywords
         required: true
         default: ティーフレックス,Teaflex,グリーンティー
+        type: string
+      anchor_keywords:
+        description: High-confidence keywords required in accepted posts
+        required: false
+        default: ティーフレックス,Teaflex
         type: string
       days:
         description: Recent-day window
@@ -14,7 +19,7 @@ on:
         default: '7'
         type: string
       max_posts:
-        description: Maximum recent posts to inspect
+        description: Maximum accepted recent posts
         required: true
         default: '30'
         type: string
@@ -39,22 +44,27 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           ISSUE_BODY: ${{ github.event.issue.body }}
           INPUT_KEYWORDS: ${{ inputs.keywords }}
+          INPUT_ANCHOR_KEYWORDS: ${{ inputs.anchor_keywords }}
           INPUT_DAYS: ${{ inputs.days }}
           INPUT_MAX_POSTS: ${{ inputs.max_posts }}
         run: |
           if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
             KEYWORDS="$INPUT_KEYWORDS"
+            ANCHOR_KEYWORDS="$INPUT_ANCHOR_KEYWORDS"
             DAYS="$INPUT_DAYS"
             MAX_POSTS="$INPUT_MAX_POSTS"
           else
             KEYWORDS=$(printf '%s\n' "$ISSUE_BODY" | sed -n 's/^keywords:[[:space:]]*//p' | head -n1)
+            ANCHOR_KEYWORDS=$(printf '%s\n' "$ISSUE_BODY" | sed -n 's/^anchor_keywords:[[:space:]]*//p' | head -n1)
             DAYS=$(printf '%s\n' "$ISSUE_BODY" | sed -n 's/^days:[[:space:]]*//p' | head -n1)
             MAX_POSTS=$(printf '%s\n' "$ISSUE_BODY" | sed -n 's/^max_posts:[[:space:]]*//p' | head -n1)
           fi
           [ -n "$KEYWORDS" ] || KEYWORDS='ティーフレックス,Teaflex,グリーンティー'
+          [ -n "$ANCHOR_KEYWORDS" ] || ANCHOR_KEYWORDS='ティーフレックス,Teaflex'
           [ -n "$DAYS" ] || DAYS='7'
           [ -n "$MAX_POSTS" ] || MAX_POSTS='30'
           echo "keywords=$KEYWORDS" >> "$GITHUB_OUTPUT"
+          echo "anchor_keywords=$ANCHOR_KEYWORDS" >> "$GITHUB_OUTPUT"
           echo "days=$DAYS" >> "$GITHUB_OUTPUT"
           echo "max_posts=$MAX_POSTS" >> "$GITHUB_OUTPUT"
 
@@ -95,10 +105,12 @@ jobs:
 
       - name: Research Instagram
         run: |
-          python instagram_research_v2.py \
+          python instagram_research_v3.py \
             --keywords "${{ steps.inputs.outputs.keywords }}" \
+            --anchor-keywords "${{ steps.inputs.outputs.anchor_keywords }}" \
             --days "${{ steps.inputs.outputs.days }}" \
             --max-posts "${{ steps.inputs.outputs.max_posts }}" \
+            --require-japanese \
             --output instagram_research.json
 
       - name: Upload research result
