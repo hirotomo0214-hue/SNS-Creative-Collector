@@ -35,8 +35,6 @@ jobs:
           print('current_usable_rows=', d['current_usable_rows'])
           print('missing_classification=', d['missing_classification_count'])
           print('signals=', len(d['signals']))
-          for s in d['signals'][:10]:
-              print(s['status'], s['kind'], s['name'], s['current_posts'], s['current_accounts'], s['rate_lift'], s['trend_score'])
           PY
       - name: Generate Teaflex transfer recommendations
         run: |
@@ -45,20 +43,25 @@ jobs:
             --snapshot trend_test_snapshot.json \
             --project 'Teaflex(ティーフレックス)' \
             --output campaign_recommendations.json
-      - name: Validate recommendation output
+      - name: Generate IF proposal pack
+        run: |
+          python if_proposal_generator.py \
+            --recommendations campaign_recommendations.json \
+            --output if_proposal_pack.json
+      - name: Validate proposal separation
         run: |
           python - <<'PY'
           import json
-          d=json.load(open('campaign_recommendations.json', encoding='utf-8'))
-          assert d['mode'] == 'initial_signal', d
-          assert d['project_rows_in_snapshot'] >= 1, d
-          assert len(d['signals_used']) >= 1, d
-          assert len(d['recommendations']) >= 1, d
+          d=json.load(open('if_proposal_pack.json', encoding='utf-8'))
+          assert d['status'] == 'proposal_candidate', d
+          assert d['proposal_summary']['recommended_direction'], d
+          assert len(d['structure_outline']) == 4, d
+          t=d['tracking_fields']
+          assert t['adopted'] is None and t['actual_post_url'] is None and t['cv'] is None, d
           print('project=', d['project'])
-          print('project_rows=', d['project_rows_in_snapshot'])
-          print('recommendations=', len(d['recommendations']))
-          for r in d['recommendations']:
-              print(r['priority'], r['hypothesis'])
+          print('status=', d['status'])
+          print('direction=', d['proposal_summary']['recommended_direction'])
+          print('proposal/actual separation=OK')
           PY
       - uses: actions/upload-artifact@v4
         with:
@@ -66,4 +69,5 @@ jobs:
           path: |
             trend_report.json
             campaign_recommendations.json
+            if_proposal_pack.json
           retention-days: 7
