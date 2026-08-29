@@ -98,7 +98,7 @@ jobs:
             --max-candidates "${{ steps.inputs.outputs.max_candidates }}" \
             --require-japanese --output instagram_research.json
       - name: Select, deduplicate, and prepare Notion queue
-        run: python research_selector.py --input instagram_research.json --known-urls known_notion_urls.json --output research_selection.json --queue-output notion_save_queue.json --auto-threshold 5
+        run: python research_selector.py --input instagram_research.json --known-urls known_notion_urls.json --output research_selection.json --queue-output notion_save_queue.json --auto-threshold 3
       - name: Upload research result
         uses: actions/upload-artifact@v4
         with:
