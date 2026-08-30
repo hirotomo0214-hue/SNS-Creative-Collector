@@ -1,9 +1,11 @@
 import argparse
 import json
 import re
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 INSTAGRAM_CODE_RE = re.compile(r"instagram\.com/(?:p|reel|tv)/([^/?#]+)", re.I)
+JST = timezone(timedelta(hours=9))
 
 
 def canonical_post_key(value: str) -> str:
@@ -76,7 +78,17 @@ def load_known_keys(path: str | None) -> set[str]:
     return {canonical_post_key(value) for value in values if canonical_post_key(value)}
 
 
-def build_notion_queue_item(post: dict) -> dict:
+def acquisition_date(generated_at: str | None) -> str:
+    if generated_at:
+        try:
+            dt = datetime.fromisoformat(str(generated_at).replace("Z", "+00:00"))
+            return dt.astimezone(JST).date().isoformat()
+        except Exception:
+            pass
+    return datetime.now(JST).date().isoformat()
+
+
+def build_notion_queue_item(post: dict, generated_at: str | None, project_hint: str) -> dict:
     account = str(post.get("account") or "").strip()
     posted_at = str(post.get("posted_at") or "")
     posted_date = posted_at[:10] if posted_at else ""
@@ -87,6 +99,9 @@ def build_notion_queue_item(post: dict) -> dict:
         "source_url": url,
         "status": "pending_live_duplicate_check",
         "target": "Notion [DB]インフルエンサー クリエイティブ収集",
+        "acquisition_date": acquisition_date(generated_at),
+        "project_hint": project_hint.strip(),
+        "account_id": account,
         "properties": {
             "動画URL": url,
             "アカウントURL": f"https://www.instagram.com/{account}/" if account else "",
@@ -119,6 +134,7 @@ def main() -> None:
     parser.add_argument("--queue-output", default="notion_save_queue.json")
     parser.add_argument("--auto-threshold", type=int, default=5)
     parser.add_argument("--known-urls", default="")
+    parser.add_argument("--project", default="")
     args = parser.parse_args()
 
     payload = json.loads(Path(args.input).read_text(encoding="utf-8"))
@@ -179,10 +195,11 @@ def main() -> None:
     }
     queue = {
         "generated_at": payload.get("generated_at"),
-        "queue_version": 2,
+        "queue_version": 3,
         "idempotency_strategy": "instagram_shortcode",
+        "project_hint": args.project.strip(),
         "pending_count": len(selected),
-        "items": [build_notion_queue_item(item) for item in selected],
+        "items": [build_notion_queue_item(item, payload.get("generated_at"), args.project) for item in selected],
     }
 
     Path(args.output).write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
