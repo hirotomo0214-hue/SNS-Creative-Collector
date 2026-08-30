@@ -26,7 +26,7 @@ def main():
         'project': project,
         'status': 'proposal_candidate',
         'evidence_mode': data.get('mode', 'initial_signal'),
-        'guardrail': '市場内の出現頻度を元にした参考提案。成果確定ではなく、IFの実投稿内容とCVで後検証する。',
+        'guardrail': '市場内の出現頻度を元にした参考提案。CV実績がある型とは断定せず、IF側の追加管理を必須にしない。',
         'proposal_summary': {
             'recommended_direction': primary.get('hypothesis', ''),
             'secondary_direction': secondary.get('hypothesis', ''),
@@ -48,15 +48,11 @@ def main():
             {'step': 3, 'role': 'personal_context', 'instruction': '自分の生活・使用場面・感想を入れて広告感を弱める'},
             {'step': 4, 'role': 'close', 'instruction': '期間・条件・購入導線を簡潔に整理する'},
         ],
-        'tracking_fields': {
+        'optional_tracking': {
             'proposal_id': None,
             'proposal_sent_at': None,
             'if_account': None,
-            'adopted': None,
-            'actual_post_url': None,
-            'actual_structure': None,
-            'actual_appeals': [],
-            'cv': None,
+            'note': '既存運用で自然に取れる場合のみ記録。実投稿・CV追跡は必須にしない。',
         },
     }
 
