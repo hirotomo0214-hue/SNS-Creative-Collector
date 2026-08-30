@@ -1,0 +1,12 @@
+# Runtime operational data must never be committed to this public repository
+runtime_data/
+existing_db_input.json
+existing_db_normalized.json
+outcome_join_report.json
+
+# Local secrets / credentials
+.env
+.env.*
+credentials.json
+service-account*.json
+*.pem
