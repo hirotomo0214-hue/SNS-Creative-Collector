@@ -17,22 +17,35 @@ jobs:
       - name: Aggregate SNS research patterns
         run: |
           python trend_aggregator.py --input trend_test_snapshot.json --output trend_report.json --as-of 2026-08-29 --current-days 7 --baseline-days 28 --min-posts 2
-      - name: Validate normalization and output
+      - name: Validate normalization and baseline guard
         run: |
           python - <<'PY'
           import json
           d=json.load(open('trend_report.json', encoding='utf-8'))
           assert d['duplicate_rows_removed'] >= 2, d
           assert d['current_usable_rows'] > 0, d
-          assert isinstance(d['signals'], list), d
+          assert d['data_quality']['baseline_sufficient'] is False, d
+          assert d['data_quality']['interpretation'] == 'initial_signal_only', d
+          assert all(s['status'] in {'initial_signal','watch'} for s in d['signals']), d
           print('duplicates_removed=', d['duplicate_rows_removed'])
           print('current_usable_rows=', d['current_usable_rows'])
-          print('missing_classification=', d['missing_classification_count'])
+          print('baseline_sufficient=', d['data_quality']['baseline_sufficient'])
+          print('interpretation=', d['data_quality']['interpretation'])
           print('signals=', len(d['signals']))
           PY
       - name: Generate Teaflex transfer recommendations
         run: |
           python recommendation_generator.py --trend trend_report.json --snapshot trend_test_snapshot.json --project 'Teaflex(ティーフレックス)' --output campaign_recommendations.json
+      - name: Validate recommendation hypothesis mode
+        run: |
+          python - <<'PY'
+          import json
+          d=json.load(open('campaign_recommendations.json', encoding='utf-8'))
+          assert d['mode'] == 'initial_signal', d
+          assert 'CV・売上との因果判定は行わない' in d['warning'], d
+          assert len(d['recommendations']) >= 1, d
+          print('recommendation hypothesis mode=OK')
+          PY
       - name: Generate IF proposal pack
         run: |
           python if_proposal_generator.py --recommendations campaign_recommendations.json --output if_proposal_pack.json
