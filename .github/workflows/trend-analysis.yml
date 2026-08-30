@@ -36,51 +36,18 @@ jobs:
       - name: Generate IF proposal pack
         run: |
           python if_proposal_generator.py --recommendations campaign_recommendations.json --output if_proposal_pack.json
-      - name: Validate proposal separation
+      - name: Validate low-maintenance proposal flow
         run: |
           python - <<'PY'
           import json
           d=json.load(open('if_proposal_pack.json', encoding='utf-8'))
           assert d['status'] == 'proposal_candidate', d
-          t=d['tracking_fields']
-          assert t['adopted'] is None and t['actual_post_url'] is None and t['cv'] is None, d
-          print('proposal/actual separation=OK')
-          PY
-      - name: Learn from actual posts and CV
-        run: |
-          python feedback_learning.py --input feedback_test_snapshot.json --output feedback_learning_report.json
-      - name: Validate feedback guardrails
-        run: |
-          python - <<'PY'
-          import json
-          d=json.load(open('feedback_learning_report.json', encoding='utf-8'))
-          assert d['mode'] == 'actual_post_cv_feedback', d
-          assert d['usable_rows'] == 6, d
-          assert len(d['skipped_rows']) == 1, d
-          offer=next(s for s in d['signals'] if s['kind']=='structure' and s['name']=='オファー起点型')
-          assert offer['posts'] == 5, offer
-          assert offer['accounts'] >= 3, offer
-          assert offer['confidence'] == 'medium', offer
-          print('actual-post feedback separation=OK')
-          PY
-      - name: Join existing proposal, actual-post and ONE-AD outcome keys
-        run: |
-          python outcome_join.py --input outcome_join_test_snapshot.json --output outcome_join_report.json
-      - name: Validate conservative attribution
-        run: |
-          python - <<'PY'
-          import json
-          d=json.load(open('outcome_join_report.json', encoding='utf-8'))
-          assert d['mode'] == 'conservative_outcome_join', d
-          assert d['summary']['joined'] == 1, d
-          assert d['summary']['creative_cv_assignments'] == 0, d
-          row=d['joined_account_project_rows'][0]
-          assert row['management_id'] == 'AMe3554', row
-          assert row['project_key'] == 'teaflex', row
-          assert row['account_project_cv'] == 2, row
-          assert row['creative_attribution_allowed'] is False, row
-          assert d['project_context_only'][0]['creative_attribution_allowed'] is False, d
-          print('conservative outcome attribution=OK')
+          assert 'tracking_fields' not in d, d
+          assert 'actual_post_url' not in d.get('optional_tracking', {}), d
+          assert 'cv' not in d.get('optional_tracking', {}), d
+          assert 'CV実績がある型とは断定せず' in d['guardrail'], d
+          print('market-trend -> campaign -> IF proposal flow=OK')
+          print('mandatory actual-post/CV tracking=REMOVED')
           PY
       - uses: actions/upload-artifact@v4
         with:
@@ -89,6 +56,4 @@ jobs:
             trend_report.json
             campaign_recommendations.json
             if_proposal_pack.json
-            feedback_learning_report.json
-            outcome_join_report.json
           retention-days: 7
