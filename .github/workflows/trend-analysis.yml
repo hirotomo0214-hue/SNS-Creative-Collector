@@ -62,7 +62,25 @@ jobs:
           assert offer['accounts'] >= 3, offer
           assert offer['confidence'] == 'medium', offer
           print('actual-post feedback separation=OK')
-          print('offer_signal=', offer)
+          PY
+      - name: Join existing proposal, actual-post and ONE-AD outcome keys
+        run: |
+          python outcome_join.py --input outcome_join_test_snapshot.json --output outcome_join_report.json
+      - name: Validate conservative attribution
+        run: |
+          python - <<'PY'
+          import json
+          d=json.load(open('outcome_join_report.json', encoding='utf-8'))
+          assert d['mode'] == 'conservative_outcome_join', d
+          assert d['summary']['joined'] == 1, d
+          assert d['summary']['creative_cv_assignments'] == 0, d
+          row=d['joined_account_project_rows'][0]
+          assert row['management_id'] == 'AMe3554', row
+          assert row['project_key'] == 'teaflex', row
+          assert row['account_project_cv'] == 2, row
+          assert row['creative_attribution_allowed'] is False, row
+          assert d['project_context_only'][0]['creative_attribution_allowed'] is False, d
+          print('conservative outcome attribution=OK')
           PY
       - uses: actions/upload-artifact@v4
         with:
@@ -72,4 +90,5 @@ jobs:
             campaign_recommendations.json
             if_proposal_pack.json
             feedback_learning_report.json
+            outcome_join_report.json
           retention-days: 7
