@@ -6,6 +6,8 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from research_selector import canonical_post_key
+
 NOTION_VERSION = "2025-09-03"
 
 
@@ -29,16 +31,43 @@ def api_request(method: str, path: str, token: str, payload: dict | None = None)
         raise RuntimeError(f"Notion API {exc.code}: {body}") from exc
 
 
-def live_duplicate_exists(token: str, data_source_id: str, url: str) -> bool:
-    payload = {
-        "filter": {
-            "property": "動画URL",
-            "url": {"equals": url},
-        },
-        "page_size": 1,
-    }
-    result = api_request("POST", f"/data_sources/{data_source_id}/query", token, payload)
-    return bool(result.get("results"))
+def extract_page_post_url(page: dict) -> str:
+    prop = (page.get("properties") or {}).get("動画URL") or {}
+    if isinstance(prop, dict):
+        return str(prop.get("url") or "").strip()
+    return ""
+
+
+def load_existing_post_keys(token: str, data_source_id: str) -> set[str]:
+    """Load canonical post keys once so /p/ and /reel/ variants cannot duplicate."""
+    keys: set[str] = set()
+    cursor = None
+    while True:
+        payload: dict = {"page_size": 100}
+        if cursor:
+            payload["start_cursor"] = cursor
+        result = api_request("POST", f"/data_sources/{data_source_id}/query", token, payload)
+        for page in result.get("results", []):
+            url = extract_page_post_url(page)
+            key = canonical_post_key(url)
+            if key:
+                keys.add(key)
+        if not result.get("has_more"):
+            break
+        cursor = result.get("next_cursor")
+        if not cursor:
+            break
+    return keys
+
+
+def queue_item_post_key(item: dict) -> str:
+    key = canonical_post_key(str(item.get("idempotency_key") or "").strip())
+    if key:
+        return key
+    source_url = str(item.get("source_url") or "").strip()
+    if not source_url:
+        source_url = str((item.get("properties") or {}).get("動画URL") or "").strip()
+    return canonical_post_key(source_url)
 
 
 def make_properties(item: dict) -> dict:
@@ -125,23 +154,31 @@ def main() -> None:
     created = []
     duplicates = []
     errors = []
+    existing_keys = set() if args.dry_run else load_existing_post_keys(token, data_source_id)
+    seen_queue_keys: set[str] = set()
 
     for item in queue.get("items", []):
-        url = str(item.get("idempotency_key") or "").strip()
-        if not url:
-            errors.append({"url": url, "error": "missing_idempotency_key"})
+        post_key = queue_item_post_key(item)
+        source_url = str(item.get("source_url") or (item.get("properties") or {}).get("動画URL") or "").strip()
+        if not post_key:
+            errors.append({"url": source_url, "error": "missing_idempotency_key"})
             continue
+        if post_key in seen_queue_keys:
+            duplicates.append({"key": post_key, "url": source_url, "reason": "duplicate_in_queue"})
+            continue
+        seen_queue_keys.add(post_key)
         if args.dry_run:
-            created.append({"url": url, "dry_run": True})
+            created.append({"key": post_key, "url": source_url, "dry_run": True})
             continue
         try:
-            if live_duplicate_exists(token, data_source_id, url):
-                duplicates.append(url)
+            if post_key in existing_keys:
+                duplicates.append({"key": post_key, "url": source_url, "reason": "duplicate_existing_notion"})
                 continue
             page = create_page(token, data_source_id, item)
-            created.append({"url": url, "page_id": page.get("id"), "page_url": page.get("url")})
+            created.append({"key": post_key, "url": source_url, "page_id": page.get("id"), "page_url": page.get("url")})
+            existing_keys.add(post_key)
         except Exception as exc:
-            errors.append({"url": url, "error": str(exc)})
+            errors.append({"key": post_key, "url": source_url, "error": str(exc)})
 
     result = {
         "status": "dry_run" if args.dry_run else ("success" if not errors else "partial_failure"),
@@ -149,6 +186,7 @@ def main() -> None:
         "duplicates": duplicates,
         "errors": errors,
         "pending_count": len(queue.get("items", [])),
+        "idempotency_strategy": "canonical_post_key",
     }
     Path(args.result).write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps(result, ensure_ascii=False))
