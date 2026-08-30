@@ -3,6 +3,11 @@ name: Instagram Research
 on:
   workflow_dispatch:
     inputs:
+      project:
+        description: Research theme or campaign name
+        required: false
+        default: Teaflex(ティーフレックス)
+        type: string
       keywords:
         description: Comma-separated Instagram discovery keywords
         required: true
@@ -48,6 +53,7 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           ISSUE_BODY: ${{ github.event.issue.body }}
+          INPUT_PROJECT: ${{ inputs.project }}
           INPUT_KEYWORDS: ${{ inputs.keywords }}
           INPUT_ANCHOR_KEYWORDS: ${{ inputs.anchor_keywords }}
           INPUT_DAYS: ${{ inputs.days }}
@@ -55,18 +61,20 @@ jobs:
           INPUT_MAX_CANDIDATES: ${{ inputs.max_candidates }}
         run: |
           if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
-            KEYWORDS="$INPUT_KEYWORDS"; ANCHOR_KEYWORDS="$INPUT_ANCHOR_KEYWORDS"; DAYS="$INPUT_DAYS"; MAX_POSTS="$INPUT_MAX_POSTS"; MAX_CANDIDATES="$INPUT_MAX_CANDIDATES"
+            PROJECT="$INPUT_PROJECT"; KEYWORDS="$INPUT_KEYWORDS"; ANCHOR_KEYWORDS="$INPUT_ANCHOR_KEYWORDS"; DAYS="$INPUT_DAYS"; MAX_POSTS="$INPUT_MAX_POSTS"; MAX_CANDIDATES="$INPUT_MAX_CANDIDATES"
           else
+            PROJECT=$(printf '%s\n' "$ISSUE_BODY" | sed -n 's/^project:[[:space:]]*//p' | head -n1)
             KEYWORDS=$(printf '%s\n' "$ISSUE_BODY" | sed -n 's/^keywords:[[:space:]]*//p' | head -n1)
             ANCHOR_KEYWORDS=$(printf '%s\n' "$ISSUE_BODY" | sed -n 's/^anchor_keywords:[[:space:]]*//p' | head -n1)
             DAYS=$(printf '%s\n' "$ISSUE_BODY" | sed -n 's/^days:[[:space:]]*//p' | head -n1)
             MAX_POSTS=$(printf '%s\n' "$ISSUE_BODY" | sed -n 's/^max_posts:[[:space:]]*//p' | head -n1)
             MAX_CANDIDATES=$(printf '%s\n' "$ISSUE_BODY" | sed -n 's/^max_candidates:[[:space:]]*//p' | head -n1)
           fi
+          [ -n "$PROJECT" ] || PROJECT=''
           [ -n "$KEYWORDS" ] || KEYWORDS='ティーフレックス,Teaflex,グリーンティー'
           [ -n "$ANCHOR_KEYWORDS" ] || ANCHOR_KEYWORDS='ティーフレックス,Teaflex'
           [ -n "$DAYS" ] || DAYS='7'; [ -n "$MAX_POSTS" ] || MAX_POSTS='30'; [ -n "$MAX_CANDIDATES" ] || MAX_CANDIDATES='30'
-          echo "keywords=$KEYWORDS" >> "$GITHUB_OUTPUT"; echo "anchor_keywords=$ANCHOR_KEYWORDS" >> "$GITHUB_OUTPUT"; echo "days=$DAYS" >> "$GITHUB_OUTPUT"; echo "max_posts=$MAX_POSTS" >> "$GITHUB_OUTPUT"; echo "max_candidates=$MAX_CANDIDATES" >> "$GITHUB_OUTPUT"
+          echo "project=$PROJECT" >> "$GITHUB_OUTPUT"; echo "keywords=$KEYWORDS" >> "$GITHUB_OUTPUT"; echo "anchor_keywords=$ANCHOR_KEYWORDS" >> "$GITHUB_OUTPUT"; echo "days=$DAYS" >> "$GITHUB_OUTPUT"; echo "max_posts=$MAX_POSTS" >> "$GITHUB_OUTPUT"; echo "max_candidates=$MAX_CANDIDATES" >> "$GITHUB_OUTPUT"
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -100,7 +108,7 @@ jobs:
             --max-candidates "${{ steps.inputs.outputs.max_candidates }}" \
             --require-japanese --output instagram_research.json
       - name: Select, deduplicate, and prepare Notion queue
-        run: python research_selector.py --input instagram_research.json --known-urls known_notion_urls.json --output research_selection.json --queue-output notion_save_queue.json --auto-threshold 3
+        run: python research_selector.py --input instagram_research.json --known-urls known_notion_urls.json --output research_selection.json --queue-output notion_save_queue.json --auto-threshold 3 --project "${{ steps.inputs.outputs.project }}"
       - name: Upload research result
         uses: actions/upload-artifact@v4
         with:
