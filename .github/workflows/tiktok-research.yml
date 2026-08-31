@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       profiles:
-        description: Comma-separated TikTok profile URLs
+        description: Comma-separated TikTok profile or tag URLs
         required: true
         default: 'https://www.tiktok.com/@deburin0'
         type: string
@@ -19,7 +19,7 @@ on:
         default: '180'
         type: string
       max_candidates:
-        description: Maximum videos inspected per profile
+        description: Maximum videos inspected per source
         required: true
         default: '50'
         type: string
@@ -60,7 +60,7 @@ jobs:
           if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
             PROFILES="$INPUT_PROFILES"; KEYWORDS="$INPUT_KEYWORDS"; DAYS="$INPUT_DAYS"; MAX_CANDIDATES="$INPUT_MAX_CANDIDATES"; MAX_POSTS="$INPUT_MAX_POSTS"
           elif [ "$EVENT_NAME" = "push" ]; then
-            PROFILES='https://www.tiktok.com/@deburin0,https://www.tiktok.com/@comi.diet,https://www.tiktok.com/@moko_474body,https://www.tiktok.com/@sango_body_make,https://www.tiktok.com/@chita_diet'; KEYWORDS='ムーンアップショーツ,ムーンアップ,moonup,アンドムーンド'; DAYS='180'; MAX_CANDIDATES='50'; MAX_POSTS='30'
+            PROFILES='https://www.tiktok.com/tag/ムーンアップショーツ,https://www.tiktok.com/tag/moonup,https://www.tiktok.com/tag/骨盤ショーツ,https://www.tiktok.com/@deburin0,https://www.tiktok.com/@comi.diet,https://www.tiktok.com/@moko_474body,https://www.tiktok.com/@sango_body_make,https://www.tiktok.com/@chita_diet'; KEYWORDS='ムーンアップショーツ,ムーンアップ,moonup,アンドムーンド,骨盤ショーツ'; DAYS='365'; MAX_CANDIDATES='100'; MAX_POSTS='30'
           else
             PROFILES=$(printf '%s\n' "$ISSUE_BODY" | sed -n 's/^profiles:[[:space:]]*//p' | head -n1)
             KEYWORDS=$(printf '%s\n' "$ISSUE_BODY" | sed -n 's/^keywords:[[:space:]]*//p' | head -n1)
