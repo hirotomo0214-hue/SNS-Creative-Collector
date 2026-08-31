@@ -94,13 +94,19 @@ def build_notion_queue_item(post: dict, generated_at: str | None, project_hint: 
     posted_date = posted_at[:10] if posted_at else ""
     url = str(post.get("url") or "").strip()
     post_key = canonical_post_key(url)
+    acquired_date = acquisition_date(generated_at)
+    title_date = acquired_date.replace("-", "")
+    project = project_hint.strip()
+    page_title = "_".join(part for part in [title_date, project, account] if part)
     return {
         "idempotency_key": post_key,
         "source_url": url,
         "status": "pending_live_duplicate_check",
         "target": "Notion [DB]インフルエンサー クリエイティブ収集",
-        "acquisition_date": acquisition_date(generated_at),
-        "project_hint": project_hint.strip(),
+        "acquisition_date": acquired_date,
+        "page_title": page_title,
+        "title_date_basis": "acquisition_date",
+        "project_hint": project,
         "account_id": account,
         "properties": {
             "動画URL": url,
@@ -123,6 +129,7 @@ def build_notion_queue_item(post: dict, generated_at: str | None, project_hint: 
             "require_live_notion_duplicate_check": True,
             "do_not_overwrite_existing": True,
             "causal_performance_claim_allowed": False,
+            "notion_title_must_use_acquisition_date_not_posted_date": True,
         },
     }
 
@@ -189,14 +196,16 @@ def main() -> None:
                 "Instagram /p/, /reel/, and /tv/ URLs are normalized to the same shortcode key.",
                 "Known Notion shortcode keys and duplicate shortcodes within the current batch are removed before persistence candidates are emitted.",
                 "The local ledger is a safety cache; live Notion duplicate checking is still required immediately before write.",
+                "Notion page titles use acquisition date in JST; 投稿日 remains the source post date property.",
                 "A high score means research-worthy candidate, not proven causal performance."
             ]
         }
     }
     queue = {
         "generated_at": payload.get("generated_at"),
-        "queue_version": 3,
+        "queue_version": 4,
         "idempotency_strategy": "instagram_shortcode",
+        "title_date_basis": "acquisition_date",
         "project_hint": args.project.strip(),
         "pending_count": len(selected),
         "items": [build_notion_queue_item(item, payload.get("generated_at"), args.project) for item in selected],
