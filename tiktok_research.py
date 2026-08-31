@@ -2,6 +2,8 @@ import argparse
 import json
 import re
 import subprocess
+import urllib.parse
+import urllib.request
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
@@ -16,6 +18,26 @@ def normalize_url(url: str) -> str | None:
     return m.group(0) if m else None
 
 
+def video_id_from_url(url: str) -> str | None:
+    m = re.search(r"/video/(\d+)", url or "")
+    return m.group(1) if m else None
+
+
+def derived_posted_at(url: str) -> datetime | None:
+    """Best-effort fallback. TikTok video IDs encode a Unix timestamp in their high bits."""
+    video_id = video_id_from_url(url)
+    if not video_id:
+        return None
+    try:
+        ts = int(video_id) >> 32
+        posted = datetime.fromtimestamp(ts, tz=timezone.utc)
+        if 2016 <= posted.year <= datetime.now(timezone.utc).year + 1:
+            return posted
+    except (ValueError, OSError, OverflowError):
+        return None
+    return None
+
+
 def ytdlp_json(url: str, flat: bool = False) -> dict:
     cmd = ["yt-dlp", "--dump-single-json", "--no-warnings"]
     if flat:
@@ -27,47 +49,111 @@ def ytdlp_json(url: str, flat: bool = False) -> dict:
     return json.loads(proc.stdout)
 
 
-def profile_posts(profile_url: str, max_candidates: int) -> list[str]:
+def tiktok_oembed(url: str) -> dict:
+    endpoint = "https://www.tiktok.com/oembed?" + urllib.parse.urlencode({"url": url})
+    req = urllib.request.Request(endpoint, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=30) as res:
+        return json.loads(res.read().decode("utf-8"))
+
+
+def profile_posts(profile_url: str, max_candidates: int) -> list[dict]:
     data = ytdlp_json(profile_url, flat=True)
-    urls = []
+    items = []
+    seen = set()
+    account = profile_url.rstrip("/").split("@")[-1]
     for entry in data.get("entries") or []:
         url = normalize_url(entry.get("webpage_url") or entry.get("url") or "")
         if not url and entry.get("id"):
-            account = profile_url.rstrip("/").split("@")[-1]
             url = f"https://www.tiktok.com/@{account}/video/{entry['id']}"
-        if url and url not in urls:
-            urls.append(url)
-        if len(urls) >= max_candidates:
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        timestamp = entry.get("timestamp") or entry.get("release_timestamp")
+        posted = datetime.fromtimestamp(int(timestamp), tz=timezone.utc) if timestamp else derived_posted_at(url)
+        items.append({
+            "url": url,
+            "account": entry.get("uploader_id") or entry.get("uploader") or account,
+            "description": entry.get("description") or entry.get("title") or "",
+            "posted_at": posted.isoformat() if posted else None,
+            "date_source": "profile_metadata" if timestamp else ("video_id_derived" if posted else None),
+            "view_count": entry.get("view_count"),
+            "like_count": entry.get("like_count"),
+            "comment_count": entry.get("comment_count"),
+            "repost_count": entry.get("repost_count"),
+        })
+        if len(items) >= max_candidates:
             break
-    return urls
+    return items
 
 
-def inspect_post(url: str, keywords: list[str], cutoff: datetime) -> tuple[dict | None, str | None]:
-    data = ytdlp_json(url)
-    timestamp = data.get("timestamp") or data.get("release_timestamp")
-    if not timestamp:
-        return None, "date_missing"
-    posted = datetime.fromtimestamp(int(timestamp), tz=timezone.utc)
+def inspect_post(candidate: dict, keywords: list[str], cutoff: datetime) -> tuple[dict | None, str | None, str | None]:
+    url = candidate["url"]
+    data = None
+    source = "profile_metadata"
+    ytdlp_error = None
+
+    try:
+        data = ytdlp_json(url)
+        source = "yt_dlp_post"
+    except Exception as exc:
+        ytdlp_error = str(exc)
+        try:
+            data = tiktok_oembed(url)
+            source = "tiktok_oembed"
+        except Exception as oembed_exc:
+            return None, "metadata_unavailable", f"yt-dlp: {ytdlp_error} | oEmbed: {oembed_exc}"
+
+    description = (
+        (data.get("description") if source == "yt_dlp_post" else None)
+        or data.get("title")
+        or candidate.get("description")
+        or ""
+    )
+    account = (
+        (data.get("uploader_id") or data.get("uploader") if source == "yt_dlp_post" else None)
+        or data.get("author_name")
+        or candidate.get("account")
+        or ""
+    )
+
+    timestamp = None
+    if source == "yt_dlp_post":
+        timestamp = data.get("timestamp") or data.get("release_timestamp")
+    if timestamp:
+        posted = datetime.fromtimestamp(int(timestamp), tz=timezone.utc)
+        date_source = "yt_dlp_post"
+    elif candidate.get("posted_at"):
+        posted = datetime.fromisoformat(candidate["posted_at"])
+        date_source = candidate.get("date_source") or "profile_metadata"
+    else:
+        posted = derived_posted_at(url)
+        date_source = "video_id_derived" if posted else None
+
+    if not posted:
+        return None, "date_missing", ytdlp_error
     if posted < cutoff:
-        return None, "outside_window"
-    description = data.get("description") or data.get("title") or ""
+        return None, "outside_window", ytdlp_error
+
     haystack = description.lower()
     matched = [k for k in keywords if k.lower() in haystack]
     if not matched:
-        return None, "keyword_miss"
-    uploader = data.get("uploader_id") or data.get("uploader") or ""
+        return None, "keyword_miss", ytdlp_error
+
     return {
-        "url": normalize_url(data.get("webpage_url") or url) or url,
+        "url": normalize_url((data.get("webpage_url") if source == "yt_dlp_post" else None) or url) or url,
         "type": "video",
         "posted_at": posted.isoformat(),
-        "account": uploader,
+        "date_source": date_source,
+        "account": account,
         "description": description[:1500],
-        "view_count": data.get("view_count"),
-        "like_count": data.get("like_count"),
-        "comment_count": data.get("comment_count"),
-        "repost_count": data.get("repost_count"),
+        "view_count": data.get("view_count") if source == "yt_dlp_post" else candidate.get("view_count"),
+        "like_count": data.get("like_count") if source == "yt_dlp_post" else candidate.get("like_count"),
+        "comment_count": data.get("comment_count") if source == "yt_dlp_post" else candidate.get("comment_count"),
+        "repost_count": data.get("repost_count") if source == "yt_dlp_post" else candidate.get("repost_count"),
         "matched_keywords": matched,
-    }, None
+        "metadata_source": source,
+        "yt_dlp_post_error": ytdlp_error,
+    }, None, None
 
 
 def main() -> None:
@@ -84,29 +170,30 @@ def main() -> None:
     keywords = [x.strip() for x in args.keywords.split(",") if x.strip()]
     cutoff = datetime.now(timezone.utc) - timedelta(days=args.days)
     candidates = []
+    seen = set()
     errors = []
-    skip_reasons = {"date_missing": 0, "outside_window": 0, "keyword_miss": 0}
+    skip_reasons = {"date_missing": 0, "outside_window": 0, "keyword_miss": 0, "metadata_unavailable": 0}
 
     for profile in profiles:
         try:
-            for url in profile_posts(profile, args.max_candidates):
-                if url not in candidates:
-                    candidates.append(url)
+            for candidate in profile_posts(profile, args.max_candidates):
+                if candidate["url"] not in seen:
+                    seen.add(candidate["url"])
+                    candidates.append(candidate)
         except Exception as exc:
             errors.append({"stage": "profile", "profile": profile, "error": str(exc)})
 
     posts = []
-    for url in candidates:
+    for candidate in candidates:
         if len(posts) >= args.max_posts:
             break
-        try:
-            item, reason = inspect_post(url, keywords, cutoff)
-            if reason:
-                skip_reasons[reason] = skip_reasons.get(reason, 0) + 1
-            elif item:
-                posts.append(item)
-        except Exception as exc:
-            errors.append({"stage": "post", "url": url, "error": str(exc)})
+        item, reason, error = inspect_post(candidate, keywords, cutoff)
+        if reason:
+            skip_reasons[reason] = skip_reasons.get(reason, 0) + 1
+            if error and reason == "metadata_unavailable":
+                errors.append({"stage": "post", "url": candidate["url"], "error": error})
+        elif item:
+            posts.append(item)
 
     payload = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
