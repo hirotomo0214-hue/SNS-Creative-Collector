@@ -1,0 +1,51 @@
+name: TikTok Browser Discovery
+
+on:
+  workflow_dispatch:
+    inputs:
+      queries:
+        description: Comma-separated TikTok search queries
+        required: true
+        default: 'ムーンアップショーツ,ムーンアップ,アンドムーンド,骨盤ショーツ'
+        type: string
+  push:
+    branches: [main]
+    paths:
+      - 'tiktok_browser_discovery.py'
+      - '.github/workflows/tiktok-browser-discovery.yml'
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Playwright
+        run: |
+          pip install playwright
+          python -m playwright install --with-deps chromium
+      - name: Resolve queries
+        id: inputs
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_QUERIES: ${{ inputs.queries }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then QUERIES="$INPUT_QUERIES"; else QUERIES='ムーンアップショーツ,ムーンアップ,アンドムーンド,骨盤ショーツ'; fi
+          echo "queries=$QUERIES" >> "$GITHUB_OUTPUT"
+      - name: Discover TikTok search results
+        run: |
+          python tiktok_browser_discovery.py \
+            --queries "${{ steps.inputs.outputs.queries }}" \
+            --max-scrolls 6 \
+            --max-results 50 \
+            --output tiktok_browser_discovery.json
+      - name: Upload result
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiktok-browser-discovery-result
+          path: tiktok_browser_discovery.json
+          if-no-files-found: error
+          retention-days: 7
