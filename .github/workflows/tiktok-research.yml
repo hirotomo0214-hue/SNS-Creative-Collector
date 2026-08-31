@@ -16,7 +16,7 @@ on:
       days:
         description: Recent-day window
         required: true
-        default: '90'
+        default: '180'
         type: string
       max_candidates:
         description: Maximum videos inspected per profile
@@ -60,7 +60,7 @@ jobs:
           if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
             PROFILES="$INPUT_PROFILES"; KEYWORDS="$INPUT_KEYWORDS"; DAYS="$INPUT_DAYS"; MAX_CANDIDATES="$INPUT_MAX_CANDIDATES"; MAX_POSTS="$INPUT_MAX_POSTS"
           elif [ "$EVENT_NAME" = "push" ]; then
-            PROFILES='https://www.tiktok.com/@deburin0'; KEYWORDS='ムーンアップショーツ,ムーンアップ,moonup,アンドムーンド'; DAYS='90'; MAX_CANDIDATES='50'; MAX_POSTS='30'
+            PROFILES='https://www.tiktok.com/@deburin0,https://www.tiktok.com/@comi.diet,https://www.tiktok.com/@moko_474body,https://www.tiktok.com/@sango_body_make,https://www.tiktok.com/@chita_diet'; KEYWORDS='ムーンアップショーツ,ムーンアップ,moonup,アンドムーンド'; DAYS='180'; MAX_CANDIDATES='50'; MAX_POSTS='30'
           else
             PROFILES=$(printf '%s\n' "$ISSUE_BODY" | sed -n 's/^profiles:[[:space:]]*//p' | head -n1)
             KEYWORDS=$(printf '%s\n' "$ISSUE_BODY" | sed -n 's/^keywords:[[:space:]]*//p' | head -n1)
@@ -68,7 +68,7 @@ jobs:
             MAX_CANDIDATES=$(printf '%s\n' "$ISSUE_BODY" | sed -n 's/^max_candidates:[[:space:]]*//p' | head -n1)
             MAX_POSTS=$(printf '%s\n' "$ISSUE_BODY" | sed -n 's/^max_posts:[[:space:]]*//p' | head -n1)
           fi
-          [ -n "$DAYS" ] || DAYS='90'; [ -n "$MAX_CANDIDATES" ] || MAX_CANDIDATES='50'; [ -n "$MAX_POSTS" ] || MAX_POSTS='30'
+          [ -n "$DAYS" ] || DAYS='180'; [ -n "$MAX_CANDIDATES" ] || MAX_CANDIDATES='50'; [ -n "$MAX_POSTS" ] || MAX_POSTS='30'
           echo "profiles=$PROFILES" >> "$GITHUB_OUTPUT"; echo "keywords=$KEYWORDS" >> "$GITHUB_OUTPUT"; echo "days=$DAYS" >> "$GITHUB_OUTPUT"; echo "max_candidates=$MAX_CANDIDATES" >> "$GITHUB_OUTPUT"; echo "max_posts=$MAX_POSTS" >> "$GITHUB_OUTPUT"
       - name: Install yt-dlp
         run: pip install -U yt-dlp
