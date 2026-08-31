@@ -24,7 +24,6 @@ def video_id_from_url(url: str) -> str | None:
 
 
 def derived_posted_at(url: str) -> datetime | None:
-    """Best-effort fallback. TikTok video IDs encode a Unix timestamp in their high bits."""
     video_id = video_id_from_url(url)
     if not video_id:
         return None
@@ -86,7 +85,7 @@ def profile_posts(profile_url: str, max_candidates: int) -> list[dict]:
     return items
 
 
-def inspect_post(candidate: dict, keywords: list[str], cutoff: datetime) -> tuple[dict | None, str | None, str | None]:
+def inspect_post(candidate: dict, keywords: list[str], cutoff: datetime) -> tuple[dict | None, str | None, str | None, dict | None]:
     url = candidate["url"]
     data = None
     source = "profile_metadata"
@@ -101,7 +100,7 @@ def inspect_post(candidate: dict, keywords: list[str], cutoff: datetime) -> tupl
             data = tiktok_oembed(url)
             source = "tiktok_oembed"
         except Exception as oembed_exc:
-            return None, "metadata_unavailable", f"yt-dlp: {ytdlp_error} | oEmbed: {oembed_exc}"
+            return None, "metadata_unavailable", f"yt-dlp: {ytdlp_error} | oEmbed: {oembed_exc}", None
 
     description = (
         (data.get("description") if source == "yt_dlp_post" else None)
@@ -130,18 +129,10 @@ def inspect_post(candidate: dict, keywords: list[str], cutoff: datetime) -> tupl
         date_source = "video_id_derived" if posted else None
 
     if not posted:
-        return None, "date_missing", ytdlp_error
-    if posted < cutoff:
-        return None, "outside_window", ytdlp_error
+        return None, "date_missing", ytdlp_error, None
 
-    haystack = description.lower()
-    matched = [k for k in keywords if k.lower() in haystack]
-    if not matched:
-        return None, "keyword_miss", ytdlp_error
-
-    return {
-        "url": normalize_url((data.get("webpage_url") if source == "yt_dlp_post" else None) or url) or url,
-        "type": "video",
+    candidate_record = {
+        "url": url,
         "posted_at": posted.isoformat(),
         "date_source": date_source,
         "account": account,
@@ -150,16 +141,28 @@ def inspect_post(candidate: dict, keywords: list[str], cutoff: datetime) -> tupl
         "like_count": data.get("like_count") if source == "yt_dlp_post" else candidate.get("like_count"),
         "comment_count": data.get("comment_count") if source == "yt_dlp_post" else candidate.get("comment_count"),
         "repost_count": data.get("repost_count") if source == "yt_dlp_post" else candidate.get("repost_count"),
-        "matched_keywords": matched,
         "metadata_source": source,
-        "yt_dlp_post_error": ytdlp_error,
-    }, None, None
+    }
+
+    if posted < cutoff:
+        return None, "outside_window", ytdlp_error, candidate_record
+
+    haystack = description.lower()
+    matched = [k for k in keywords if k.lower() in haystack]
+    if not matched:
+        return None, "keyword_miss", ytdlp_error, candidate_record
+
+    item = dict(candidate_record)
+    item["type"] = "video"
+    item["matched_keywords"] = matched
+    item["yt_dlp_post_error"] = ytdlp_error
+    return item, None, None, candidate_record
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--profiles", required=True, help="Comma-separated TikTok profile URLs")
-    parser.add_argument("--keywords", required=True, help="Comma-separated discovery keywords")
+    parser.add_argument("--profiles", required=True)
+    parser.add_argument("--keywords", required=True)
     parser.add_argument("--days", type=int, default=30)
     parser.add_argument("--max-candidates", type=int, default=50)
     parser.add_argument("--max-posts", type=int, default=30)
@@ -184,15 +187,16 @@ def main() -> None:
             errors.append({"stage": "profile", "profile": profile, "error": str(exc)})
 
     posts = []
+    recent_candidates = []
     for candidate in candidates:
-        if len(posts) >= args.max_posts:
-            break
-        item, reason, error = inspect_post(candidate, keywords, cutoff)
+        item, reason, error, candidate_record = inspect_post(candidate, keywords, cutoff)
+        if candidate_record and datetime.fromisoformat(candidate_record["posted_at"]) >= cutoff:
+            recent_candidates.append(candidate_record)
         if reason:
             skip_reasons[reason] = skip_reasons.get(reason, 0) + 1
             if error and reason == "metadata_unavailable":
                 errors.append({"stage": "post", "url": candidate["url"], "error": error})
-        elif item:
+        elif item and len(posts) < args.max_posts:
             posts.append(item)
 
     payload = {
@@ -201,13 +205,15 @@ def main() -> None:
         "keywords": keywords,
         "days": args.days,
         "candidate_count": len(candidates),
-        "recent_post_count": len(posts),
+        "recent_candidate_count": len(recent_candidates),
+        "matched_post_count": len(posts),
         "skip_reasons": skip_reasons,
         "posts": sorted(posts, key=lambda x: x["posted_at"], reverse=True),
+        "recent_candidates": sorted(recent_candidates, key=lambda x: x["posted_at"], reverse=True),
         "errors": errors,
     }
     Path(args.output).write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(json.dumps({"candidate_count": len(candidates), "recent_post_count": len(posts), "skip_reasons": skip_reasons, "errors": len(errors)}, ensure_ascii=False))
+    print(json.dumps({"candidate_count": len(candidates), "recent_candidate_count": len(recent_candidates), "matched_post_count": len(posts), "skip_reasons": skip_reasons, "errors": len(errors)}, ensure_ascii=False))
 
 
 if __name__ == "__main__":
