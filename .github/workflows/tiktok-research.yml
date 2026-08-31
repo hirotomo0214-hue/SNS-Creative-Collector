@@ -30,10 +30,15 @@ on:
         type: string
   issues:
     types: [opened, reopened, edited]
+  push:
+    branches: [main]
+    paths:
+      - 'tiktok_research.py'
+      - '.github/workflows/tiktok-research.yml'
 
 jobs:
   research:
-    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.issue.title, '[tiktok-research]')
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'push' || startsWith(github.event.issue.title, '[tiktok-research]')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -54,6 +59,8 @@ jobs:
         run: |
           if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
             PROFILES="$INPUT_PROFILES"; KEYWORDS="$INPUT_KEYWORDS"; DAYS="$INPUT_DAYS"; MAX_CANDIDATES="$INPUT_MAX_CANDIDATES"; MAX_POSTS="$INPUT_MAX_POSTS"
+          elif [ "$EVENT_NAME" = "push" ]; then
+            PROFILES='https://www.tiktok.com/@deburin0'; KEYWORDS='ムーンアップショーツ,ムーンアップ,moonup,アンドムーンド'; DAYS='90'; MAX_CANDIDATES='50'; MAX_POSTS='30'
           else
             PROFILES=$(printf '%s\n' "$ISSUE_BODY" | sed -n 's/^profiles:[[:space:]]*//p' | head -n1)
             KEYWORDS=$(printf '%s\n' "$ISSUE_BODY" | sed -n 's/^keywords:[[:space:]]*//p' | head -n1)
