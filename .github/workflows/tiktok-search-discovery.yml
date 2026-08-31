@@ -1,0 +1,50 @@
+name: TikTok Search Discovery
+
+on:
+  workflow_dispatch:
+    inputs:
+      queries:
+        description: Comma-separated search queries
+        required: true
+        default: 'site:tiktok.com/@/video ムーンアップショーツ,site:tiktok.com/@/video ムーンアップ,site:tiktok.com/@/video moonup アンドムーンド,site:tiktok.com/@/video 骨盤ショーツ'
+        type: string
+  push:
+    branches: [main]
+    paths:
+      - 'tiktok_search_discovery.py'
+      - '.github/workflows/tiktok-search-discovery.yml'
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Resolve queries
+        id: inputs
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_QUERIES: ${{ inputs.queries }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            QUERIES="$INPUT_QUERIES"
+          else
+            QUERIES='site:tiktok.com/@/video ムーンアップショーツ,site:tiktok.com/@/video ムーンアップ,site:tiktok.com/@/video moonup アンドムーンド,site:tiktok.com/@/video 骨盤ショーツ'
+          fi
+          echo "queries=$QUERIES" >> "$GITHUB_OUTPUT"
+      - name: Search indexed TikTok posts
+        run: |
+          python tiktok_search_discovery.py \
+            --queries "${{ steps.inputs.outputs.queries }}" \
+            --max-results 30 \
+            --output tiktok_search_discovery.json
+      - name: Upload result
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiktok-search-discovery-result
+          path: tiktok_search_discovery.json
+          if-no-files-found: error
+          retention-days: 7
