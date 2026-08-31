@@ -26,6 +26,18 @@ jobs:
         run: |
           pip install playwright
           python -m playwright install --with-deps chromium
+      - name: Restore TikTok storageState
+        shell: bash
+        env:
+          TIKTOK_STORAGE_STATE_B64: ${{ secrets.TIKTOK_STORAGE_STATE_B64 }}
+        run: |
+          if [ -z "$TIKTOK_STORAGE_STATE_B64" ]; then
+            echo 'TIKTOK_STORAGE_STATE_B64 secret is not configured.'
+            exit 2
+          fi
+          printf '%s' "$TIKTOK_STORAGE_STATE_B64" | base64 -d > /tmp/tiktok-storage-state.json
+          python -m json.tool /tmp/tiktok-storage-state.json >/dev/null
+          chmod 600 /tmp/tiktok-storage-state.json
       - name: Resolve queries
         id: inputs
         shell: bash
@@ -36,6 +48,8 @@ jobs:
           if [ "$EVENT_NAME" = "workflow_dispatch" ]; then QUERIES="$INPUT_QUERIES"; else QUERIES='ムーンアップショーツ,ムーンアップ,アンドムーンド,骨盤ショーツ'; fi
           echo "queries=$QUERIES" >> "$GITHUB_OUTPUT"
       - name: Discover TikTok search results
+        env:
+          TIKTOK_STORAGE_STATE_FILES: /tmp/tiktok-storage-state.json
         run: |
           python tiktok_browser_discovery.py \
             --queries "${{ steps.inputs.outputs.queries }}" \
@@ -43,9 +57,10 @@ jobs:
             --max-results 50 \
             --output tiktok_browser_discovery.json
       - name: Upload result
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: tiktok-browser-discovery-result
           path: tiktok_browser_discovery.json
-          if-no-files-found: error
+          if-no-files-found: ignore
           retention-days: 7
