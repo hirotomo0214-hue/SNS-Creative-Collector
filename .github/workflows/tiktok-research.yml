@@ -1,0 +1,83 @@
+name: TikTok Research
+
+on:
+  workflow_dispatch:
+    inputs:
+      profiles:
+        description: Comma-separated TikTok profile URLs
+        required: true
+        default: 'https://www.tiktok.com/@deburin0'
+        type: string
+      keywords:
+        description: Comma-separated post keywords
+        required: true
+        default: 'ムーンアップショーツ,ムーンアップ,moonup,アンドムーンド'
+        type: string
+      days:
+        description: Recent-day window
+        required: true
+        default: '90'
+        type: string
+      max_candidates:
+        description: Maximum videos inspected per profile
+        required: true
+        default: '50'
+        type: string
+      max_posts:
+        description: Maximum matched posts
+        required: true
+        default: '30'
+        type: string
+  issues:
+    types: [opened, reopened, edited]
+
+jobs:
+  research:
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.issue.title, '[tiktok-research]')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Resolve inputs
+        id: inputs
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          INPUT_PROFILES: ${{ inputs.profiles }}
+          INPUT_KEYWORDS: ${{ inputs.keywords }}
+          INPUT_DAYS: ${{ inputs.days }}
+          INPUT_MAX_CANDIDATES: ${{ inputs.max_candidates }}
+          INPUT_MAX_POSTS: ${{ inputs.max_posts }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            PROFILES="$INPUT_PROFILES"; KEYWORDS="$INPUT_KEYWORDS"; DAYS="$INPUT_DAYS"; MAX_CANDIDATES="$INPUT_MAX_CANDIDATES"; MAX_POSTS="$INPUT_MAX_POSTS"
+          else
+            PROFILES=$(printf '%s\n' "$ISSUE_BODY" | sed -n 's/^profiles:[[:space:]]*//p' | head -n1)
+            KEYWORDS=$(printf '%s\n' "$ISSUE_BODY" | sed -n 's/^keywords:[[:space:]]*//p' | head -n1)
+            DAYS=$(printf '%s\n' "$ISSUE_BODY" | sed -n 's/^days:[[:space:]]*//p' | head -n1)
+            MAX_CANDIDATES=$(printf '%s\n' "$ISSUE_BODY" | sed -n 's/^max_candidates:[[:space:]]*//p' | head -n1)
+            MAX_POSTS=$(printf '%s\n' "$ISSUE_BODY" | sed -n 's/^max_posts:[[:space:]]*//p' | head -n1)
+          fi
+          [ -n "$DAYS" ] || DAYS='90'; [ -n "$MAX_CANDIDATES" ] || MAX_CANDIDATES='50'; [ -n "$MAX_POSTS" ] || MAX_POSTS='30'
+          echo "profiles=$PROFILES" >> "$GITHUB_OUTPUT"; echo "keywords=$KEYWORDS" >> "$GITHUB_OUTPUT"; echo "days=$DAYS" >> "$GITHUB_OUTPUT"; echo "max_candidates=$MAX_CANDIDATES" >> "$GITHUB_OUTPUT"; echo "max_posts=$MAX_POSTS" >> "$GITHUB_OUTPUT"
+      - name: Install yt-dlp
+        run: pip install -U yt-dlp
+      - name: Discover TikTok posts
+        run: |
+          python tiktok_research.py \
+            --profiles "${{ steps.inputs.outputs.profiles }}" \
+            --keywords "${{ steps.inputs.outputs.keywords }}" \
+            --days "${{ steps.inputs.outputs.days }}" \
+            --max-candidates "${{ steps.inputs.outputs.max_candidates }}" \
+            --max-posts "${{ steps.inputs.outputs.max_posts }}" \
+            --output tiktok_research.json
+      - name: Upload result
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiktok-research-result
+          path: tiktok_research.json
+          if-no-files-found: error
+          retention-days: 7
