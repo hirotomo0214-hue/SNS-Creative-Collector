@@ -16,6 +16,13 @@ def storage_state():
     raise SystemExit("No Instagram storageState files configured")
 
 
+def body_text(page):
+    try:
+        return page.locator("body").inner_text(timeout=5000)
+    except Exception:
+        return ""
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--keyword", default="ティーフレックス")
@@ -38,7 +45,20 @@ def main():
         page.wait_for_timeout(6000)
         result["actions"].append({"step":"home","url":page.url,"title":page.title()})
 
-        # Try to open the Search surface through visible UI, not the legacy direct keyword URL.
+        # Instagram may show a remembered-account continuation screen even when cookies exist.
+        initial_body = body_text(page)
+        if ("別のプロフィールを使用" in initial_body or "Use another profile" in initial_body) and ("次へ" in initial_body or "Continue" in initial_body):
+            for label in ["次へ", "Continue"]:
+                try:
+                    loc = page.get_by_text(label, exact=True)
+                    if loc.count():
+                        loc.first.click(timeout=5000)
+                        result["actions"].append({"step":"click_remembered_account_continue","label":label})
+                        page.wait_for_timeout(7000)
+                        break
+                except Exception as exc:
+                    result["actions"].append({"step":"continue_error","label":label,"error":str(exc)[:300]})
+
         clicked = False
         for label in ["検索", "Search"]:
             try:
@@ -52,7 +72,6 @@ def main():
                 result["actions"].append({"step":"click_search_text_error","label":label,"error":str(exc)[:300]})
 
         if not clicked:
-            # Current Instagram nav commonly exposes a Search link/button with an accessible label.
             for selector in ['a[aria-label*="検索"]','a[aria-label*="Search"]','div[role="button"][aria-label*="検索"]','div[role="button"][aria-label*="Search"]']:
                 try:
                     loc = page.locator(selector)
@@ -67,14 +86,7 @@ def main():
         page.wait_for_timeout(2500)
 
         input_loc = None
-        selectors = [
-            'input[placeholder="検索"]',
-            'input[placeholder="Search"]',
-            'input[aria-label="検索入力"]',
-            'input[aria-label="Search input"]',
-            'input[type="text"]'
-        ]
-        for selector in selectors:
+        for selector in ['input[placeholder="検索"]','input[placeholder="Search"]','input[aria-label="検索入力"]','input[aria-label="Search input"]','input[type="text"]']:
             try:
                 loc = page.locator(selector)
                 if loc.count():
@@ -106,10 +118,7 @@ def main():
 
         result["final_url"] = page.url
         result["title"] = page.title()
-        try:
-            result["body_sample"] = page.locator("body").inner_text(timeout=5000)[:8000]
-        except Exception as exc:
-            result["body_sample_error"] = str(exc)
+        result["body_sample"] = body_text(page)[:8000]
 
         context.close()
         browser.close()
