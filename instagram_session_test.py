@@ -17,10 +17,43 @@ def looks_logged_in(page) -> bool:
     try:
         if page.locator('input[name="username"]').count() > 0:
             return False
+        if page.locator('input[name="password"]').count() > 0:
+            return False
+        if page.locator('input[type="password"]').count() > 0:
+            return False
     except Exception:
         pass
 
-    return True
+    try:
+        body = page.locator("body").inner_text(timeout=5000).lower()
+    except Exception:
+        body = ""
+
+    invalid_markers = [
+        "別のプロフィールを使用",
+        "use another profile",
+        "パスワードを忘れた場合",
+        "forgot password",
+        "パスワード",
+        "password",
+    ]
+    if any(marker.lower() in body for marker in invalid_markers):
+        return False
+
+    # A usable authenticated home should expose at least one normal app-nav signal.
+    authenticated_markers = [
+        "検索",
+        "search",
+        "発見",
+        "explore",
+        "メッセージ",
+        "messages",
+        "通知",
+        "notifications",
+        "プロフィール",
+        "profile",
+    ]
+    return any(marker.lower() in body for marker in authenticated_markers)
 
 
 def main() -> None:
@@ -39,7 +72,7 @@ def main() -> None:
                 viewport={"width": 1280, "height": 900},
                 user_agent=(
                     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+                    "(KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
                 ),
             )
             page = context.new_page()
