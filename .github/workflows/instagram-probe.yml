@@ -59,13 +59,13 @@ jobs:
           done
           if [ -z "$FILES" ]; then echo "No Instagram storageState secrets are configured"; exit 1; fi
           echo "IG_STORAGE_STATE_FILES=$FILES" >> "$GITHUB_ENV"
-      - name: Probe Instagram search
-        run: python instagram_graphql_probe.py --keyword "${{ steps.inputs.outputs.keyword }}" --output instagram_graphql_probe.json
+      - name: Probe current Instagram search UI
+        run: python instagram_ui_search_probe.py --keyword "${{ steps.inputs.outputs.keyword }}" --output instagram_ui_search_probe.json
       - name: Upload probe
         uses: actions/upload-artifact@v4
         with:
-          name: instagram-probe-result
-          path: instagram_graphql_probe.json
+          name: instagram-ui-probe-result
+          path: instagram_ui_search_probe.json
           if-no-files-found: error
           retention-days: 7
       - name: Remove temporary Instagram sessions
